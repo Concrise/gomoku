@@ -113,6 +113,13 @@ const SCORES = {
     LIVE_ONE: 10        // 活一
 };
 
+const HARD_AI = {
+    SEARCH_DEPTH: 3,
+    CANDIDATE_LIMIT: 18,
+    SEARCH_LIMIT: 12,
+    WIN_SCORE: SCORES.FIVE * 100
+};
+
 // ==================== 菜单控制 ====================
 function showDifficultyMenu() {
     if (elements.mainMenu) elements.mainMenu.style.display = 'none';
@@ -202,8 +209,8 @@ function showPressurePanel() {
     if (elements.pressureTip) elements.pressureTip.textContent = PRESSURE_TIPS[diff];
 
     // 根据难度设置搜索深度
-    if (elements.searchDepth) elements.searchDepth.textContent = diff === 'hard' ? '2' : '1';
-    if (elements.candidateCount) elements.candidateCount.textContent = diff === 'hard' ? '15' : 'n²';
+    if (elements.searchDepth) elements.searchDepth.textContent = diff === 'hard' ? String(HARD_AI.SEARCH_DEPTH) : '1';
+    if (elements.candidateCount) elements.candidateCount.textContent = diff === 'hard' ? String(HARD_AI.CANDIDATE_LIMIT) : 'n²';
     if (elements.nodeCount) elements.nodeCount.textContent = '-';
 
     elements.aiPressurePanel.classList.add('show');
@@ -820,6 +827,36 @@ function evaluateLine(x, y, dx, dy, player) {
     return 0;
 }
 
+function hasImmediateWin(player) {
+    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
+        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
+            if (gameState.board[i][j] !== 0) continue;
+            if (!hasNeighbor(i, j)) continue;
+            gameState.board[i][j] = player;
+            const isWin = checkWin(i, j, player);
+            gameState.board[i][j] = 0;
+            gameState.winningLine = [];
+            if (isWin) return true;
+        }
+    }
+    return false;
+}
+
+function findImmediateWin(player) {
+    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
+        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
+            if (gameState.board[i][j] !== 0) continue;
+            if (!hasNeighbor(i, j)) continue;
+            gameState.board[i][j] = player;
+            const isWin = checkWin(i, j, player);
+            gameState.board[i][j] = 0;
+            gameState.winningLine = [];
+            if (isWin) return { x: i, y: j };
+        }
+    }
+    return null;
+}
+
 /**
  * 获取AI落子位置
  */
@@ -883,12 +920,18 @@ function getMediumMove(aiPlayer) {
  * 搜索2层深度
  */
 function getHardMove(aiPlayer) {
+    const opponent = gameState.playerColor;
+    const immediateWin = findImmediateWin(aiPlayer);
+    if (immediateWin) return immediateWin;
+    const immediateBlock = findImmediateWin(opponent);
+    if (immediateBlock) return immediateBlock;
+
     let bestMove = null, bestScore = -Infinity;
-    const candidates = getCandidates(aiPlayer);
+    const candidates = getCandidates(aiPlayer, HARD_AI.CANDIDATE_LIMIT);
 
     for (const { x, y } of candidates) {
         gameState.board[x][y] = aiPlayer;
-        const score = minimax(2, -Infinity, Infinity, false, aiPlayer);
+        const score = minimax(HARD_AI.SEARCH_DEPTH, -Infinity, Infinity, false, aiPlayer);
         gameState.board[x][y] = 0;
         if (score > bestScore) {
             bestScore = score;
@@ -904,8 +947,11 @@ function getHardMove(aiPlayer) {
 function minimax(depth, alpha, beta, isMaximizing, aiPlayer) {
     aiStats.nodeCount++;
 
+    const opponent = gameState.playerColor;
+    if (hasImmediateWin(aiPlayer)) return HARD_AI.WIN_SCORE + depth;
+    if (hasImmediateWin(opponent)) return -HARD_AI.WIN_SCORE - depth;
     if (depth === 0) return evaluateBoard(aiPlayer);
-    const candidates = getCandidates(aiPlayer).slice(0, 10);
+    const candidates = getCandidates(aiPlayer, HARD_AI.SEARCH_LIMIT);
     if (candidates.length === 0) return evaluateBoard(aiPlayer);
 
     if (isMaximizing) {
@@ -936,19 +982,22 @@ function minimax(depth, alpha, beta, isMaximizing, aiPlayer) {
 /**
  * 获取候选落子位置
  */
-function getCandidates(aiPlayer) {
+function getCandidates(aiPlayer, limit) {
     const candidates = [];
     for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
         for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
             if (gameState.board[i][j] === 0 && hasNeighbor(i, j)) {
+                const opponent = gameState.playerColor;
                 const attack = evaluatePoint(i, j, aiPlayer);
-                const defense = evaluatePoint(i, j, gameState.playerColor);
-                candidates.push({ x: i, y: j, score: attack + defense });
+                const defense = evaluatePoint(i, j, opponent);
+                const score = attack + defense * 1.2;
+                candidates.push({ x: i, y: j, score });
             }
         }
     }
     candidates.sort((a, b) => b.score - a.score);
-    return candidates.slice(0, 15);
+    if (typeof limit === 'number') return candidates.slice(0, limit);
+    return candidates;
 }
 
 /**
@@ -956,12 +1005,17 @@ function getCandidates(aiPlayer) {
  */
 function evaluateBoard(aiPlayer) {
     let score = 0;
+    const opponent = gameState.playerColor;
     for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
         for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
             if (gameState.board[i][j] === aiPlayer) {
                 score += evaluatePosition(i, j, aiPlayer);
-            } else if (gameState.board[i][j] === gameState.playerColor) {
-                score -= evaluatePosition(i, j, gameState.playerColor);
+            } else if (gameState.board[i][j] === opponent) {
+                score -= evaluatePosition(i, j, opponent);
+            } else if (hasNeighbor(i, j)) {
+                const attack = evaluatePoint(i, j, aiPlayer);
+                const defense = evaluatePoint(i, j, opponent);
+                score += attack * 0.8 - defense;
             }
         }
     }
