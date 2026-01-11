@@ -656,20 +656,20 @@ function placePiece(x, y, isAI = false) {
         gameState.gameOver = true;
         showResult(gameState.currentPlayer);
         drawBoard();
-        elements.undoBtn.disabled = true;
+        if (elements.undoBtn) elements.undoBtn.disabled = true;
         return true;
     }
 
     if (gameState.history.length === CONFIG.BOARD_SIZE * CONFIG.BOARD_SIZE) {
         gameState.gameOver = true;
         showResult(0);
-        elements.undoBtn.disabled = true;
+        if (elements.undoBtn) elements.undoBtn.disabled = true;
         return true;
     }
 
     gameState.currentPlayer = gameState.currentPlayer === 1 ? 2 : 1;
     updateStatus();
-    elements.undoBtn.disabled = gameState.history.length === 0 || gameState.isAiThinking;
+    if (elements.undoBtn) elements.undoBtn.disabled = gameState.history.length === 0 || gameState.isAiThinking;
 
     // AI回合
     if (gameState.gameMode === 'pve' && gameState.currentPlayer !== gameState.playerColor && !gameState.gameOver) {
@@ -716,27 +716,33 @@ function aiMove() {
 }
 
 function showResult(winner) {
+    if (!elements.gameResult) return;
+
     elements.gameResult.classList.remove('black-wins', 'white-wins', 'draw');
 
     if (winner === 1) {
-        elements.resultTitle.textContent = '黑棋获胜！';
-        if (gameState.gameMode === 'pve') {
-            elements.resultDesc.textContent = gameState.playerColor === 1 ? '恭喜你战胜了AI！' : 'AI获胜，再接再厉！';
-        } else {
-            elements.resultDesc.textContent = '黑方玩家获得胜利';
+        if (elements.resultTitle) elements.resultTitle.textContent = '黑棋获胜！';
+        if (elements.resultDesc) {
+            if (gameState.gameMode === 'pve') {
+                elements.resultDesc.textContent = gameState.playerColor === 1 ? '恭喜你战胜了AI！' : 'AI获胜，再接再厉！';
+            } else {
+                elements.resultDesc.textContent = '黑方玩家获得胜利';
+            }
         }
         elements.gameResult.classList.add('black-wins');
     } else if (winner === 2) {
-        elements.resultTitle.textContent = '白棋获胜！';
-        if (gameState.gameMode === 'pve') {
-            elements.resultDesc.textContent = gameState.playerColor === 2 ? '恭喜你战胜了AI！' : 'AI获胜，再接再厉！';
-        } else {
-            elements.resultDesc.textContent = '白方玩家获得胜利';
+        if (elements.resultTitle) elements.resultTitle.textContent = '白棋获胜！';
+        if (elements.resultDesc) {
+            if (gameState.gameMode === 'pve') {
+                elements.resultDesc.textContent = gameState.playerColor === 2 ? '恭喜你战胜了AI！' : 'AI获胜，再接再厉！';
+            } else {
+                elements.resultDesc.textContent = '白方玩家获得胜利';
+            }
         }
         elements.gameResult.classList.add('white-wins');
     } else {
-        elements.resultTitle.textContent = '平局！';
-        elements.resultDesc.textContent = '棋逢对手，势均力敌';
+        if (elements.resultTitle) elements.resultTitle.textContent = '平局！';
+        if (elements.resultDesc) elements.resultDesc.textContent = '棋逢对手，势均力敌';
         elements.gameResult.classList.add('draw');
     }
 
@@ -755,7 +761,7 @@ function undo() {
     }
 
     gameState.winningLine = [];
-    elements.undoBtn.disabled = gameState.history.length === 0;
+    if (elements.undoBtn) elements.undoBtn.disabled = gameState.history.length === 0;
     updateStatus();
     updateMoveHistory();
     drawBoard();
@@ -1008,30 +1014,32 @@ function hasNeighbor(x, y, distance = 2) {
 }
 
 // ==================== 事件监听 ====================
-elements.canvas.addEventListener('click', (e) => {
-    if (!canPlayerMove()) return;
-    const pos = getPosition(e);
-    if (pos) placePiece(pos.x, pos.y, false);
-});
+if (elements.canvas) {
+    elements.canvas.addEventListener('click', (e) => {
+        if (!canPlayerMove()) return;
+        const pos = getPosition(e);
+        if (pos) placePiece(pos.x, pos.y, false);
+    });
 
-// 触摸事件支持（移动端）
-elements.canvas.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    if (!canPlayerMove()) return;
-    const touch = e.changedTouches[0];
-    const pos = getPosition(touch);
-    if (pos) placePiece(pos.x, pos.y, false);
-});
+    // 触摸事件支持（移动端）
+    elements.canvas.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        if (!canPlayerMove()) return;
+        const touch = e.changedTouches[0];
+        const pos = getPosition(touch);
+        if (pos) placePiece(pos.x, pos.y, false);
+    });
+}
 
-elements.undoBtn.addEventListener('click', undo);
-elements.restartBtn.addEventListener('click', restartGame);
+if (elements.undoBtn) elements.undoBtn.addEventListener('click', undo);
+if (elements.restartBtn) elements.restartBtn.addEventListener('click', restartGame);
 
 // 窗口大小变化时重新调整棋盘
 let resizeTimeout;
 window.addEventListener('resize', () => {
     clearTimeout(resizeTimeout);
     resizeTimeout = setTimeout(() => {
-        if (elements.gameWrapper.classList.contains('show')) {
+        if (elements.gameWrapper && elements.gameWrapper.classList.contains('show') && elements.canvas) {
             adjustBoardSize();
             const cssWidth = (CONFIG.BOARD_SIZE - 1) * CONFIG.CELL_SIZE + CONFIG.PADDING * 2;
             elements.canvas.style.width = cssWidth + 'px';
