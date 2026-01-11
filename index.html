@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>五子棋</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 开始界面 -->
+    <div class="start-screen" id="startScreen">
+        <h1>五子棋</h1>
+        <p class="subtitle">GOMOKU</p>
+        <div class="menu-container">
+            <div id="mainMenu">
+                <p class="menu-title">选择游戏模式</p>
+                <button class="menu-btn pvp" onclick="startGame('pvp')">
+                    双人对战
+                    <span class="desc">与朋友在同一设备对战</span>
+                </button>
+                <button class="menu-btn pve" onclick="showDifficultyMenu()">
+                    人机对战
+                    <span class="desc">挑战AI对手</span>
+                </button>
+                <button class="menu-btn docs" onclick="showAlgorithmDocs()">
+                    📖 算法说明书
+                    <span class="desc">了解AI背后的算法原理</span>
+                </button>
+            </div>
+
+            <div class="sub-menu" id="difficultyMenu">
+                <h3>选择AI难度</h3>
+                <div class="diff-card easy" onclick="selectDifficulty('easy')">
+                    <div class="diff-header">
+                        <span class="diff-title">简单</span>
+                        <span class="diff-badge">入门</span>
+                    </div>
+                    <p class="diff-desc">评分算法 + 随机选择</p>
+                </div>
+                <div class="diff-card medium" onclick="selectDifficulty('medium')">
+                    <div class="diff-header">
+                        <span class="diff-title">中等</span>
+                        <span class="diff-badge">进阶</span>
+                    </div>
+                    <p class="diff-desc">启发式评估函数</p>
+                </div>
+                <div class="diff-card hard" onclick="selectDifficulty('hard')">
+                    <div class="diff-header">
+                        <span class="diff-title">困难</span>
+                        <span class="diff-badge">挑战</span>
+                    </div>
+                    <p class="diff-desc">Minimax + Alpha-Beta 剪枝</p>
+                </div>
+                <button class="back-btn" onclick="backToMain()">返回</button>
+            </div>
+
+            <div class="sub-menu" id="colorMenu">
+                <h3>选择你的棋子</h3>
+                <div class="color-selection">
+                    <div class="color-btn" onclick="startGame('pve', selectedDifficulty, 'black')">
+                        <div class="piece-preview black"></div>
+                        <div class="color-label">执黑</div>
+                        <div class="color-hint">先手</div>
+                    </div>
+                    <div class="color-btn" onclick="startGame('pve', selectedDifficulty, 'white')">
+                        <div class="piece-preview white"></div>
+                        <div class="color-label">执白</div>
+                        <div class="color-hint">后手</div>
+                    </div>
+                </div>
+                <button class="back-btn" onclick="backToDifficulty()">返回</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 算法说明书弹窗 -->
+    <div class="docs-overlay" id="docsOverlay">
+        <div class="docs-container">
+            <div class="docs-header">
+                <h2>📖 五子棋AI算法说明书</h2>
+                <button class="docs-close" onclick="hideAlgorithmDocs()">×</button>
+            </div>
+            <div class="docs-content">
+                <!-- 目录 -->
+                <div class="docs-toc">
+                    <h3>目录</h3>
+                    <ul>
+                        <li><a href="#intro">引言：博弈论与AI</a></li>
+                        <li><a href="#scoring">评分算法 (Scoring)</a></li>
+                        <li><a href="#minimax">极小化极大算法 (Minimax)</a></li>
+                        <li><a href="#alphabeta">Alpha-Beta 剪枝</a></li>
+                        <li><a href="#patterns">棋型识别</a></li>
+                    </ul>
+                </div>
+
+                <!-- 引言 -->
+                <section id="intro" class="docs-section">
+                    <h3>🎯 引言：博弈论与人工智能</h3>
+                    <div class="docs-card history">
+                        <h4>历史背景</h4>
+                        <p>博弈论的数学基础可追溯到 <strong>1928年</strong> 冯·诺依曼（John von Neumann）的极小化极大定理。1950年代，克劳德·香农（Claude Shannon）首次提出计算机下棋的理论框架。</p>
+                        <div class="fun-fact">
+                            <span class="fact-icon">💡</span>
+                            <p><strong>趣味知识：</strong>1997年，IBM的"深蓝"击败国际象棋世界冠军卡斯帕罗夫，每秒可评估2亿个棋局位置。而我们的五子棋AI在你的浏览器中运行，每秒约评估数万个位置！</p>
+                        </div>
+                    </div>
+
+                    <div class="docs-card">
+                        <h4>零和博弈 (Zero-Sum Game)</h4>
+                        <p>五子棋属于<strong>二人零和完全信息博弈</strong>：</p>
+                        <ul>
+                            <li><strong>零和</strong>：一方的收益等于另一方的损失</li>
+                            <li><strong>完全信息</strong>：双方都能看到棋盘全貌</li>
+                            <li><strong>确定性</strong>：没有随机因素（如掷骰子）</li>
+                        </ul>
+                        <div class="formula-box">
+                            <div class="formula">
+                                V(玩家A) + V(玩家B) = 0
+                            </div>
+                            <p class="formula-desc">其中 V 表示局面价值</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 评分算法 -->
+                <section id="scoring" class="docs-section">
+                    <h3>📊 评分算法 (Position Scoring)</h3>
+                    <div class="difficulty-tag easy">简单模式 / 中等模式</div>
+
+                    <div class="docs-card history">
+                        <h4>算法起源</h4>
+                        <p>评分算法是最直观的AI策略，源于人类棋手的经验总结。早在1970年代的早期电脑游戏中就已广泛使用，至今仍是许多棋类AI的基础。</p>
+                    </div>
+
+                    <div class="docs-card">
+                        <h4>核心原理</h4>
+                        <p>为棋盘上每个空位计算一个<strong>分数</strong>，分数越高表示该位置越有价值。分数由两部分组成：</p>
+                        <div class="formula-box large">
+                            <div class="formula">
+                                Score(p) = α · Attack(p) + β · Defense(p)
+                            </div>
+                            <p class="formula-desc">
+                                p = 位置坐标<br>
+                                Attack(p) = 进攻价值（我方在此落子的收益）<br>
+                                Defense(p) = 防守价值（阻止对手在此落子的收益）<br>
+                                α, β = 权重系数（中等模式：α=1.1, β=1.0）
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="docs-card">
+                        <h4>棋型分值表</h4>
+                        <table class="score-table">
+                            <thead>
+                                <tr><th>棋型</th><th>形态</th><th>分值</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>连五</td><td>●●●●●</td><td class="score">1,000,000</td></tr>
+                                <tr><td>活四</td><td>○●●●●○</td><td class="score">100,000</td></tr>
+                                <tr><td>冲四</td><td>●●●●○ 或 ●●●○●</td><td class="score">10,000</td></tr>
+                                <tr><td>活三</td><td>○●●●○</td><td class="score">5,000</td></tr>
+                                <tr><td>眠三</td><td>●●●○○</td><td class="score">500</td></tr>
+                                <tr><td>活二</td><td>○●●○</td><td class="score">200</td></tr>
+                                <tr><td>眠二</td><td>●●○○</td><td class="score">50</td></tr>
+                            </tbody>
+                        </table>
+                        <p class="table-note">● = 棋子，○ = 空位</p>
+                    </div>
+
+                    <div class="docs-card example">
+                        <h4>示例分析</h4>
+                        <div class="example-board">
+                            <pre>
+  A B C D E F G
+7 · · · · · · ·
+6 · · · ● · · ·
+5 · · ● · · · ·
+4 · ● · · ○ · ·
+3 · · · · · · ·
+2 · · · · · · ·
+                            </pre>
+                        </div>
+                        <p>假设黑棋（●）考虑在 <strong>D5</strong> 位置落子：</p>
+                        <ul>
+                            <li>形成对角线三子 → <strong>活三(5000分)</strong></li>
+                            <li>该位置进攻价值 Attack(D5) = 5000</li>
+                        </ul>
+                    </div>
+
+                    <div class="fun-fact">
+                        <span class="fact-icon">🎲</span>
+                        <p><strong>简单模式的秘密：</strong>为什么简单模式更"笨"？它从得分最高的前3个位置中<strong>随机</strong>选择，而不是总选最高分。这模拟了人类"手滑"的情况！</p>
+                    </div>
+                </section>
+
+                <!-- Minimax算法 -->
+                <section id="minimax" class="docs-section">
+                    <h3>🌳 极小化极大算法 (Minimax)</h3>
+                    <div class="difficulty-tag hard">困难模式</div>
+
+                    <div class="docs-card history">
+                        <h4>算法起源</h4>
+                        <p><strong>1928年</strong>，数学家冯·诺依曼证明了极小化极大定理，奠定了博弈论的数学基础。该算法成为AI博弈领域的基石，几乎所有棋类AI都基于此原理。</p>
+                        <div class="fun-fact">
+                            <span class="fact-icon">🏆</span>
+                            <p><strong>历史时刻：</strong>1997年国际象棋、2016年围棋（AlphaGo）、2019年德州扑克——AI在复杂博弈中一次次超越人类，Minimax的变体始终是核心组件。</p>
+                        </div>
+                    </div>
+
+                    <div class="docs-card">
+                        <h4>核心思想</h4>
+                        <p>假设双方都是<strong>完美理性</strong>的：</p>
+                        <ul>
+                            <li><strong>MAX层</strong>（AI）：选择对自己最有利的走法</li>
+                            <li><strong>MIN层</strong>（对手）：假设对手也会选择对AI最不利的走法</li>
+                        </ul>
+                        <div class="formula-box large">
+                            <div class="formula">
+                                minimax(s) =
+                                <span class="formula-cases">
+                                    { eval(s), 若s是终止状态或深度=0<br>
+                                    { max(minimax(s')), 若是MAX层<br>
+                                    { min(minimax(s')), 若是MIN层
+                                </span>
+                            </div>
+                            <p class="formula-desc">s = 当前状态，s' = 所有可能的后继状态</p>
+                        </div>
+                    </div>
+
+                    <div class="docs-card">
+                        <h4>博弈树示意</h4>
+                        <div class="game-tree">
+                            <pre>
+                    [MAX] 根节点 (AI选择)
+                      │
+         ┌────────────┼────────────┐
+         ▼            ▼            ▼
+      [MIN]        [MIN]        [MIN]  (对手选择)
+         │            │            │
+      ┌──┴──┐     ┌──┴──┐     ┌──┴──┐
+      ▼     ▼     ▼     ▼     ▼     ▼
+     [3]   [5]   [2]   [9]   [1]   [6]  (叶子节点评分)
+
+MIN层选择：  3         2         1
+MAX层选择：        max(3,2,1) = 3
+                            </pre>
+                        </div>
+                        <p>AI会选择左边分支，因为即使对手最优应对，AI也能保证得分≥3</p>
+                    </div>
+
+                    <div class="docs-card">
+                        <h4>时间复杂度</h4>
+                        <div class="formula-box">
+                            <div class="formula">
+                                O(b<sup>d</sup>)
+                            </div>
+                            <p class="formula-desc">
+                                b = 分支因子（每个节点的子节点数）<br>
+                                d = 搜索深度<br>
+                                五子棋：b ≈ 200（空位数），d = 2 → 约40,000个节点
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Alpha-Beta剪枝 -->
+                <section id="alphabeta" class="docs-section">
+                    <h3>✂️ Alpha-Beta 剪枝</h3>
+                    <div class="difficulty-tag hard">困难模式</div>
+
+                    <div class="docs-card history">
+                        <h4>算法起源</h4>
+                        <p><strong>1958年</strong>，Allen Newell 和 Herbert Simon 在研究国际象棋程序时首次描述了这一优化技术。<strong>1975年</strong>，Donald Knuth 和 Ronald Moore 对其进行了严格的数学分析。</p>
+                    </div>
+
+                    <div class="docs-card">
+                        <h4>核心原理</h4>
+                        <p>在Minimax搜索中，很多分支是<strong>不必要探索</strong>的——因为无论结果如何，都不会影响最终决策。</p>
+                        <div class="formula-box large">
+                            <div class="formula">
+                                α = 当前MAX层已找到的最佳选择（下界）<br>
+                                β = 当前MIN层已找到的最佳选择（上界）<br><br>
+                                <strong>剪枝条件：</strong> α ≥ β 时停止搜索
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="docs-card">
+                        <h4>剪枝示意</h4>
+                        <div class="game-tree">
+                            <pre>
+                    [MAX] α=-∞
+                      │
+         ┌────────────┼────────────┐
+         ▼            ▼            ▼
+      [MIN]        [MIN]        [MIN]
+      β=+∞         β=3
+         │            │
+      ┌──┴──┐     ┌──┴──┐
+      ▼     ▼     ▼     ▼
+     [3]   [5]   [2]   ✂️    ← 剪枝！
+                  ↑
+            发现2 < α(=3)，后续无需搜索
+                            </pre>
+                        </div>
+                        <p>第二个MIN节点发现值为2，小于已知的α=3，无论后续节点值如何，MAX都不会选择这条分支。</p>
+                    </div>
+
+                    <div class="docs-card">
+                        <h4>效率提升</h4>
+                        <div class="formula-box">
+                            <div class="formula">
+                                最优情况：O(b<sup>d/2</sup>)<br>
+                                平均情况：O(b<sup>3d/4</sup>)
+                            </div>
+                            <p class="formula-desc">
+                                在最优情况下，搜索效率提升至平方根级别！<br>
+                                原本需要40,000节点 → 优化后约200节点
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="fun-fact">
+                        <span class="fact-icon">⚡</span>
+                        <p><strong>优化技巧：</strong>本游戏还使用了"候选位置筛选"——只考虑得分最高的15个位置，进一步将分支因子从200+降到15！</p>
+                    </div>
+                </section>
+
+                <!-- 棋型识别 -->
+                <section id="patterns" class="docs-section">
+                    <h3>🔍 棋型识别 (Pattern Recognition)</h3>
+
+                    <div class="docs-card">
+                        <h4>四方向扫描</h4>
+                        <p>对每个位置，AI在四个方向上扫描棋型：</p>
+                        <div class="direction-demo">
+                            <div class="dir-item">
+                                <span class="dir-arrow">─</span>
+                                <span>水平</span>
+                            </div>
+                            <div class="dir-item">
+                                <span class="dir-arrow">│</span>
+                                <span>垂直</span>
+                            </div>
+                            <div class="dir-item">
+                                <span class="dir-arrow">╲</span>
+                                <span>主对角线</span>
+                            </div>
+                            <div class="dir-item">
+                                <span class="dir-arrow">╱</span>
+                                <span>副对角线</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="docs-card">
+                        <h4>评估函数伪代码</h4>
+                        <div class="code-block">
+                            <pre>
+function evaluateLine(position, direction):
+    count = 1          // 连续棋子数
+    block = 0          // 被封堵的端点数
+
+    // 正向扫描
+    for i = 1 to 4:
+        next = position + direction * i
+        if next是己方棋子: count++
+        else if next是空位: break
+        else: block++; break
+
+    // 反向扫描
+    for i = 1 to 4:
+        next = position - direction * i
+        // ... 同上
+
+    // 返回棋型分数
+    return getScore(count, block)
+                            </pre>
+                        </div>
+                    </div>
+                </section>
+
+                <div class="docs-footer">
+                    <p>💡 选择困难模式，与Alpha-Beta剪枝算法一决高下吧！</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 游戏界面 -->
+    <div class="game-wrapper" id="gameWrapper">
+        <div class="game-container">
+            <div class="game-header">
+                <h1>五子棋</h1>
+                <button class="exit-btn" onclick="exitGame()">退出游戏</button>
+            </div>
+            <div class="mode-info">
+                <span id="modeLabel">双人对战</span>
+            </div>
+            <div class="status-bar">
+                <div class="player-info">
+                    <div class="player-piece black"></div>
+                    <span class="player-label active" id="blackLabel">黑棋</span>
+                </div>
+                <div class="turn-indicator">
+                    <span class="arrow">▶</span>
+                    <span id="turnText">黑棋回合</span>
+                </div>
+                <div class="player-info">
+                    <span class="player-label" id="whiteLabel">白棋</span>
+                    <div class="player-piece white"></div>
+                </div>
+            </div>
+
+            <!-- 棋盘区域 -->
+            <div class="board-area">
+                <div class="board-container">
+                    <canvas id="board"></canvas>
+                </div>
+
+                <!-- AI算法压迫感面板 -->
+                <div class="ai-pressure-panel" id="aiPressurePanel">
+                    <div class="pressure-header">
+                        <span class="pressure-icon">🤖</span>
+                        <span class="pressure-title" id="pressureTitle">AI 分析中</span>
+                    </div>
+                    <div class="pressure-formula" id="pressureFormula">
+                        <!-- 动态内容 -->
+                    </div>
+                    <div class="pressure-stats">
+                        <div class="stat">
+                            <span class="stat-label">搜索深度</span>
+                            <span class="stat-value" id="searchDepth">-</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">候选位置</span>
+                            <span class="stat-value" id="candidateCount">-</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">评估节点</span>
+                            <span class="stat-value" id="nodeCount">-</span>
+                        </div>
+                    </div>
+                    <div class="pressure-tip" id="pressureTip"></div>
+                </div>
+            </div>
+
+            <div class="buttons">
+                <button class="action-btn" id="undoBtn" disabled>悔棋</button>
+                <button class="action-btn" id="restartBtn">重新开始</button>
+            </div>
+            <div class="game-result" id="gameResult">
+                <h2 id="resultTitle"></h2>
+                <p id="resultDesc"></p>
+                <div class="game-result-buttons">
+                    <button class="play-again" onclick="restartGame()">再来一局</button>
+                    <button class="back-menu" onclick="exitGame()">返回菜单</button>
+                </div>
+            </div>
+            <div class="thinking" id="thinking">
+                <span>AI思考中</span>
+                <div class="thinking-dots"><span></span><span></span><span></span></div>
+            </div>
+        </div>
+
+        <div class="side-panel">
+            <h3>对局记录</h3>
+            <div class="move-history" id="moveHistory"></div>
+            <div class="stats">
+                <div class="stat-item">
+                    <span>总步数</span>
+                    <span class="value" id="totalMoves">0</span>
+                </div>
+                <div class="stat-item">
+                    <span>游戏模式</span>
+                    <span class="value" id="gameModeStat">双人对战</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
