@@ -96,28 +96,42 @@ const ALGORITHM_INFO = {
         desc: '识别棋型（活四、冲四、活三等），为每种棋型赋分，选择得分最高的位置。时间复杂度 O(n²)'
     },
     hard: {
-        name: 'Minimax + Alpha-Beta',
-        desc: '博弈树搜索2层深度，Alpha-Beta剪枝优化，只考虑前15个候选位置。时间复杂度 O(b^d)'
+        name: 'Minimax + Alpha-Beta + 威胁检测',
+        desc: '博弈树搜索6层深度，Alpha-Beta剪枝优化，主动识别活四、双三、四三等必杀棋型。时间复杂度 O(b^d)'
+    },
+    hell: {
+        name: 'VCF/VCT + 深度Minimax',
+        desc: '专业级算法：VCF连续冲四必杀搜索、VCT连续威胁搜索、8层博弈树、开局库。理论上先手必胜。'
     }
 };
 
 // ==================== 棋型评分 ====================
 const SCORES = {
-    FIVE: 1000000,      // 连五
-    LIVE_FOUR: 100000,  // 活四
-    RUSH_FOUR: 10000,   // 冲四
-    LIVE_THREE: 5000,   // 活三
-    SLEEP_THREE: 500,   // 眠三
-    LIVE_TWO: 200,      // 活二
-    SLEEP_TWO: 50,      // 眠二
-    LIVE_ONE: 10        // 活一
+    FIVE: 10000000,      // 连五
+    LIVE_FOUR: 1000000,  // 活四
+    RUSH_FOUR: 100000,   // 冲四
+    LIVE_THREE: 80000,   // 活三 (大幅提升，识别双三等杀招)
+    SLEEP_THREE: 2000,   // 眠三
+    LIVE_TWO: 1000,      // 活二
+    SLEEP_TWO: 200,      // 眠二
+    LIVE_ONE: 50         // 活一
 };
 
 const HARD_AI = {
-    SEARCH_DEPTH: 3,
-    CANDIDATE_LIMIT: 18,
-    SEARCH_LIMIT: 12,
-    WIN_SCORE: SCORES.FIVE * 100
+    SEARCH_DEPTH: 6,     // 增加搜索深度到6层
+    CANDIDATE_LIMIT: 25, // 增加候选节点
+    SEARCH_LIMIT: 15,    // 增加分支数量
+    WIN_SCORE: SCORES.FIVE * 10
+};
+
+// 地狱难度配置
+const HELL_AI = {
+    SEARCH_DEPTH: 8,      // 更深的搜索
+    CANDIDATE_LIMIT: 30,  // 更多候选
+    SEARCH_LIMIT: 20,     // 更多分支
+    VCF_DEPTH: 20,        // VCF搜索深度（连续冲四）
+    VCT_DEPTH: 12,        // VCT搜索深度（连续威胁）
+    WIN_SCORE: SCORES.FIVE * 10
 };
 
 // ==================== 菜单控制 ====================
@@ -177,21 +191,27 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== AI压迫感面板 ====================
 const PRESSURE_FORMULAS = {
-    easy: `Score(p) = Attack(p) + 0.8×Defense(p)
-选择: random(top 3)`,
+    easy: `Score(p) = Attack(p) + 1.0×Defense(p)
+选择: random(top 3) / best`,
     medium: `Score(p) = 1.1×Attack(p) + Defense(p)
 Attack = Σ PatternScore(d)
 选择: argmax(Score)`,
     hard: `minimax(s, d, α, β) =
   eval(s), if d=0
   max/min(minimax(s', d-1, α, β))
-剪枝: α ≥ β`
+剪枝: α ≥ β
+威胁检测: 活四、双三、四三`,
+    hell: `VCF: 连续冲四搜索(depth=20)
+VCT: 连续威胁搜索(depth=12)
+Minimax(depth=8) + α-β剪枝
+开局库 + 必胜路径计算`
 };
 
 const PRESSURE_TIPS = {
     easy: '从最高分的3个位置中随机选择，模拟人类"手滑"',
     medium: '识别棋型并评分，始终选择得分最高的位置',
-    hard: '预测你的下一步，选择对AI最有利的走法'
+    hard: '深度搜索6层，主动识别并利用组合杀招',
+    hell: '专业级AI，搜索必胜路径，理论上无法战胜'
 };
 
 let aiStats = {
@@ -236,7 +256,7 @@ function startGame(mode, diff = 'easy', color = 'black') {
     gameState.difficulty = diff;
     gameState.playerColor = color === 'black' ? 1 : 2;
 
-    const diffNames = { easy: '简单', medium: '中等', hard: '困难' };
+    const diffNames = { easy: '简单', medium: '中等', hard: '困难', hell: '地狱' };
 
     if (mode === 'pvp') {
         if (elements.modeLabel) elements.modeLabel.textContent = '双人对战';
@@ -697,7 +717,8 @@ function aiMove() {
     if (elements.pressureTitle) elements.pressureTitle.textContent = 'AI 计算中...';
     if (elements.nodeCount) elements.nodeCount.textContent = '计算中';
 
-    const delay = gameState.difficulty === 'hard' ? 600 : 350;
+    const delays = { easy: 350, medium: 350, hard: 800, hell: 1200 };
+    const delay = delays[gameState.difficulty] || 350;
 
     // 重置统计
     aiStats.nodeCount = 0;
@@ -784,15 +805,41 @@ function getAIPlayer() {
 }
 
 /**
- * 评估单个位置的分数
+ * 评估单个位置的分数（增强版，识别组合棋型）
  */
 function evaluatePoint(x, y, player) {
     if (gameState.board[x][y] !== 0) return 0;
     let score = 0;
     const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+
+    let liveThreeCount = 0;
+    let rushFourCount = 0;
+    let liveFourCount = 0;
+
     for (const [dx, dy] of directions) {
-        score += evaluateLine(x, y, dx, dy, player);
+        const lineScore = evaluateLine(x, y, dx, dy, player);
+        score += lineScore;
+
+        // 统计关键棋型数量
+        if (lineScore >= SCORES.LIVE_FOUR) liveFourCount++;
+        else if (lineScore >= SCORES.RUSH_FOUR) rushFourCount++;
+        else if (lineScore >= SCORES.LIVE_THREE) liveThreeCount++;
     }
+
+    // 组合棋型加成（这些是必杀棋型）
+    if (liveFourCount >= 1) {
+        score += SCORES.LIVE_FOUR; // 活四必杀
+    }
+    if (rushFourCount >= 2) {
+        score += SCORES.LIVE_FOUR * 0.9; // 双冲四接近必杀
+    }
+    if (rushFourCount >= 1 && liveThreeCount >= 1) {
+        score += SCORES.LIVE_FOUR * 0.8; // 四三连攻是必杀
+    }
+    if (liveThreeCount >= 2) {
+        score += SCORES.RUSH_FOUR * 0.9; // 双活三很危险
+    }
+
     return score;
 }
 
@@ -866,6 +913,7 @@ function getAIMove() {
         case 'easy': return getEasyMove(aiPlayer);
         case 'medium': return getMediumMove(aiPlayer);
         case 'hard': return getHardMove(aiPlayer);
+        case 'hell': return getHellMove(aiPlayer);
         default: return getEasyMove(aiPlayer);
     }
 }
@@ -882,12 +930,19 @@ function getEasyMove(aiPlayer) {
                 aiStats.nodeCount++;
                 const attack = evaluatePoint(i, j, aiPlayer);
                 const defense = evaluatePoint(i, j, gameState.playerColor);
-                candidates.push({ x: i, y: j, score: attack + defense * 0.8 });
+                // 提高防守权重，避免过于弱智
+                candidates.push({ x: i, y: j, score: attack + defense * 1.0 });
             }
         }
     }
     if (candidates.length === 0) return { x: 7, y: 7 };
     candidates.sort((a, b) => b.score - a.score);
+    
+    // 如果有必杀或必防的棋（分数极高），则减少随机性
+    if (candidates[0].score > SCORES.RUSH_FOUR) {
+        return candidates[0];
+    }
+
     const topN = Math.min(3, candidates.length);
     return candidates[Math.floor(Math.random() * topN)];
 }
@@ -916,22 +971,43 @@ function getMediumMove(aiPlayer) {
 }
 
 /**
- * 困难AI：Minimax + Alpha-Beta剪枝
- * 搜索2层深度
+ * 困难AI：Minimax + Alpha-Beta剪枝（增强版）
+ * 搜索6层深度，增强威胁检测
  */
 function getHardMove(aiPlayer) {
     const opponent = gameState.playerColor;
+
+    // 1. 必杀：自己能连五直接下
     const immediateWin = findImmediateWin(aiPlayer);
     if (immediateWin) return immediateWin;
+
+    // 2. 必防：对手能连五必须堵
     const immediateBlock = findImmediateWin(opponent);
     if (immediateBlock) return immediateBlock;
 
+    // 3. 检测对手的活四威胁
+    const opponentLiveFour = findThreat(opponent, SCORES.LIVE_FOUR);
+    if (opponentLiveFour) return opponentLiveFour;
+
+    // 4. 自己能形成活四就下
+    const myLiveFour = findThreat(aiPlayer, SCORES.LIVE_FOUR);
+    if (myLiveFour) return myLiveFour;
+
+    // 5. 检测对手的双三等组合威胁
+    const opponentDoubleThree = findComboThreat(opponent);
+    if (opponentDoubleThree) return opponentDoubleThree;
+
+    // 6. 自己能形成双三就下
+    const myDoubleThree = findComboThreat(aiPlayer);
+    if (myDoubleThree) return myDoubleThree;
+
+    // 7. Minimax搜索
     let bestMove = null, bestScore = -Infinity;
     const candidates = getCandidates(aiPlayer, HARD_AI.CANDIDATE_LIMIT);
 
     for (const { x, y } of candidates) {
         gameState.board[x][y] = aiPlayer;
-        const score = minimax(HARD_AI.SEARCH_DEPTH, -Infinity, Infinity, false, aiPlayer);
+        const score = minimax(HARD_AI.SEARCH_DEPTH - 1, -Infinity, Infinity, false, aiPlayer);
         gameState.board[x][y] = 0;
         if (score > bestScore) {
             bestScore = score;
@@ -939,6 +1015,539 @@ function getHardMove(aiPlayer) {
         }
     }
     return bestMove || { x: 7, y: 7 };
+}
+
+/**
+ * 查找特定分数的威胁点
+ */
+function findThreat(player, minScore) {
+    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
+        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
+            if (gameState.board[i][j] !== 0) continue;
+            if (!hasNeighbor(i, j)) continue;
+            const score = evaluatePoint(i, j, player);
+            if (score >= minScore) {
+                return { x: i, y: j };
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * 查找组合威胁（双活三、四三等）
+ */
+function findComboThreat(player) {
+    let bestMove = null;
+    let bestScore = 0;
+
+    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
+        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
+            if (gameState.board[i][j] !== 0) continue;
+            if (!hasNeighbor(i, j)) continue;
+
+            const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+            let liveThreeCount = 0;
+            let rushFourCount = 0;
+
+            for (const [dx, dy] of directions) {
+                const lineScore = evaluateLine(i, j, dx, dy, player);
+                if (lineScore >= SCORES.RUSH_FOUR) rushFourCount++;
+                else if (lineScore >= SCORES.LIVE_THREE) liveThreeCount++;
+            }
+
+            // 双活三或四三连攻
+            if (liveThreeCount >= 2 || (rushFourCount >= 1 && liveThreeCount >= 1)) {
+                const score = liveThreeCount * 2 + rushFourCount * 3;
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMove = { x: i, y: j };
+                }
+            }
+        }
+    }
+    return bestMove;
+}
+
+// ==================== 地狱难度 AI ====================
+
+/**
+ * 开局库 - 经典五子棋开局定式
+ * 先手走天元，后续按定式走
+ */
+const OPENING_BOOK = {
+    // 先手开局：天元
+    first: { x: 7, y: 7 },
+    // 应对对手天元的开局
+    responses: [
+        // 如果对手下天元，走斜向
+        { condition: [[7, 7]], move: { x: 8, y: 8 } },
+        // 如果对手下天元旁边，走天元
+        { condition: [[6, 7]], move: { x: 7, y: 7 } },
+        { condition: [[8, 7]], move: { x: 7, y: 7 } },
+        { condition: [[7, 6]], move: { x: 7, y: 7 } },
+        { condition: [[7, 8]], move: { x: 7, y: 7 } },
+    ]
+};
+
+/**
+ * 地狱AI：VCF/VCT + 深度Minimax
+ * 接近无敌的AI
+ */
+function getHellMove(aiPlayer) {
+    const opponent = gameState.playerColor;
+    const moveCount = gameState.history.length;
+
+    // 开局库
+    if (moveCount === 0) {
+        return OPENING_BOOK.first;
+    }
+    if (moveCount === 1) {
+        const firstMove = gameState.history[0];
+        for (const resp of OPENING_BOOK.responses) {
+            if (resp.condition.some(([x, y]) => firstMove.x === x && firstMove.y === y)) {
+                if (gameState.board[resp.move.x][resp.move.y] === 0) {
+                    return resp.move;
+                }
+            }
+        }
+        // 默认靠近对手
+        return findBestOpeningMove(aiPlayer);
+    }
+
+    // 1. 自己能连五 → 直接赢
+    const immediateWin = findImmediateWin(aiPlayer);
+    if (immediateWin) return immediateWin;
+
+    // 2. 对手能连五 → 必须堵
+    const immediateBlock = findImmediateWin(opponent);
+    if (immediateBlock) return immediateBlock;
+
+    // 3. VCF搜索：找己方必胜的连续冲四路径
+    const vcfMove = searchVCF(aiPlayer, HELL_AI.VCF_DEPTH);
+    if (vcfMove) return vcfMove;
+
+    // 4. 检测并阻止对手的VCF
+    const opponentVCF = searchVCF(opponent, HELL_AI.VCF_DEPTH);
+    if (opponentVCF) {
+        // 对手有VCF，必须防守
+        const blockMove = findBestBlock(opponent, opponentVCF);
+        if (blockMove) return blockMove;
+    }
+
+    // 5. VCT搜索：找己方的连续威胁路径
+    const vctMove = searchVCT(aiPlayer, HELL_AI.VCT_DEPTH);
+    if (vctMove) return vctMove;
+
+    // 6. 检测对手活四
+    const opponentLiveFour = findThreat(opponent, SCORES.LIVE_FOUR);
+    if (opponentLiveFour) return opponentLiveFour;
+
+    // 7. 自己形成活四
+    const myLiveFour = findThreat(aiPlayer, SCORES.LIVE_FOUR);
+    if (myLiveFour) return myLiveFour;
+
+    // 8. 检测对手组合威胁
+    const opponentCombo = findComboThreat(opponent);
+    if (opponentCombo) return opponentCombo;
+
+    // 9. 自己形成组合威胁
+    const myCombo = findComboThreat(aiPlayer);
+    if (myCombo) return myCombo;
+
+    // 10. 深度Minimax搜索
+    return hellMinimax(aiPlayer);
+}
+
+/**
+ * 找到最佳开局位置
+ */
+function findBestOpeningMove(aiPlayer) {
+    const center = 7;
+    const candidates = [];
+
+    // 优先考虑中心区域
+    for (let dx = -2; dx <= 2; dx++) {
+        for (let dy = -2; dy <= 2; dy++) {
+            const x = center + dx;
+            const y = center + dy;
+            if (gameState.board[x][y] === 0 && hasNeighbor(x, y, 1)) {
+                const attack = evaluatePoint(x, y, aiPlayer);
+                const defense = evaluatePoint(x, y, gameState.playerColor);
+                candidates.push({ x, y, score: attack + defense });
+            }
+        }
+    }
+
+    if (candidates.length === 0) return { x: 7, y: 7 };
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0];
+}
+
+/**
+ * VCF搜索 - Victory by Continuous Four
+ * 搜索连续冲四直到获胜的路径
+ */
+function searchVCF(player, maxDepth) {
+    const opponent = player === 1 ? 2 : 1;
+
+    function vcfSearch(depth, isAttacker) {
+        aiStats.nodeCount++;
+
+        if (depth <= 0) return null;
+
+        // 检查是否已经获胜
+        if (hasImmediateWin(player)) {
+            return findImmediateWin(player);
+        }
+
+        if (isAttacker) {
+            // 进攻方：寻找冲四点
+            const rushFours = findAllRushFours(player);
+
+            for (const move of rushFours) {
+                gameState.board[move.x][move.y] = player;
+
+                // 检查是否形成连五
+                if (checkWinWithoutState(move.x, move.y, player)) {
+                    gameState.board[move.x][move.y] = 0;
+                    return move;
+                }
+
+                // 对手必须防守的点
+                const blockPoint = findImmediateWin(player);
+                if (blockPoint) {
+                    gameState.board[blockPoint.x][blockPoint.y] = opponent;
+
+                    // 递归搜索
+                    const result = vcfSearch(depth - 1, true);
+
+                    gameState.board[blockPoint.x][blockPoint.y] = 0;
+                    gameState.board[move.x][move.y] = 0;
+
+                    if (result) return move;
+                } else {
+                    gameState.board[move.x][move.y] = 0;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    return vcfSearch(maxDepth, true);
+}
+
+/**
+ * 找到所有冲四点
+ */
+function findAllRushFours(player) {
+    const moves = [];
+
+    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
+        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
+            if (gameState.board[i][j] !== 0) continue;
+            if (!hasNeighbor(i, j)) continue;
+
+            const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+            for (const [dx, dy] of directions) {
+                const lineScore = evaluateLine(i, j, dx, dy, player);
+                if (lineScore >= SCORES.RUSH_FOUR) {
+                    moves.push({ x: i, y: j, score: lineScore });
+                    break;
+                }
+            }
+        }
+    }
+
+    moves.sort((a, b) => b.score - a.score);
+    return moves;
+}
+
+/**
+ * VCT搜索 - Victory by Continuous Threat
+ * 搜索连续威胁（活三、冲四）直到获胜的路径
+ */
+function searchVCT(player, maxDepth) {
+    const opponent = player === 1 ? 2 : 1;
+
+    function vctSearch(depth, isAttacker) {
+        aiStats.nodeCount++;
+
+        if (depth <= 0) return null;
+
+        // 先尝试VCF
+        const vcfResult = searchVCF(player, Math.min(depth, 10));
+        if (vcfResult) return vcfResult;
+
+        if (isAttacker) {
+            // 寻找威胁点（活三或冲四）
+            const threats = findAllThreats(player);
+
+            for (const move of threats) {
+                gameState.board[move.x][move.y] = player;
+
+                // 检查是否形成必杀
+                if (hasImmediateWin(player)) {
+                    gameState.board[move.x][move.y] = 0;
+                    return move;
+                }
+
+                // 对手必须防守
+                const mustBlock = findMustBlockPoint(player);
+                if (mustBlock) {
+                    gameState.board[mustBlock.x][mustBlock.y] = opponent;
+
+                    const result = vctSearch(depth - 2, true);
+
+                    gameState.board[mustBlock.x][mustBlock.y] = 0;
+                    gameState.board[move.x][move.y] = 0;
+
+                    if (result) return move;
+                } else {
+                    gameState.board[move.x][move.y] = 0;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    return vctSearch(maxDepth, true);
+}
+
+/**
+ * 找到所有威胁点（活三及以上）
+ */
+function findAllThreats(player) {
+    const moves = [];
+
+    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
+        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
+            if (gameState.board[i][j] !== 0) continue;
+            if (!hasNeighbor(i, j)) continue;
+
+            const score = evaluatePoint(i, j, player);
+            if (score >= SCORES.LIVE_THREE) {
+                moves.push({ x: i, y: j, score });
+            }
+        }
+    }
+
+    moves.sort((a, b) => b.score - a.score);
+    return moves.slice(0, 15); // 限制数量以保证性能
+}
+
+/**
+ * 找到必须防守的点
+ */
+function findMustBlockPoint(player) {
+    // 检查活四
+    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
+        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
+            if (gameState.board[i][j] !== 0) continue;
+            if (!hasNeighbor(i, j)) continue;
+
+            const score = evaluatePoint(i, j, player);
+            if (score >= SCORES.LIVE_FOUR) {
+                return { x: i, y: j };
+            }
+        }
+    }
+
+    // 检查冲四
+    return findImmediateWin(player);
+}
+
+/**
+ * 找到最佳防守点
+ */
+function findBestBlock(attacker, threatMove) {
+    const defender = attacker === 1 ? 2 : 1;
+
+    // 找到所有可能的防守点
+    const blockCandidates = [];
+
+    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
+        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
+            if (gameState.board[i][j] !== 0) continue;
+            if (!hasNeighbor(i, j)) continue;
+
+            gameState.board[i][j] = defender;
+
+            // 检查这个防守是否能阻止VCF
+            const stillHasVCF = searchVCF(attacker, 10);
+
+            gameState.board[i][j] = 0;
+
+            if (!stillHasVCF) {
+                const score = evaluatePoint(i, j, defender);
+                blockCandidates.push({ x: i, y: j, score });
+            }
+        }
+    }
+
+    if (blockCandidates.length > 0) {
+        blockCandidates.sort((a, b) => b.score - a.score);
+        return blockCandidates[0];
+    }
+
+    // 如果找不到完美防守，至少堵住最紧急的威胁
+    return findThreat(attacker, SCORES.RUSH_FOUR) || threatMove;
+}
+
+/**
+ * 检查是否获胜（不修改gameState.winningLine）
+ */
+function checkWinWithoutState(x, y, player) {
+    const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+
+    for (const [dx, dy] of directions) {
+        let count = 1;
+
+        for (let i = 1; i < 5; i++) {
+            const nx = x + dx * i, ny = y + dy * i;
+            if (nx >= 0 && nx < CONFIG.BOARD_SIZE && ny >= 0 && ny < CONFIG.BOARD_SIZE && gameState.board[nx][ny] === player) {
+                count++;
+            } else break;
+        }
+
+        for (let i = 1; i < 5; i++) {
+            const nx = x - dx * i, ny = y - dy * i;
+            if (nx >= 0 && nx < CONFIG.BOARD_SIZE && ny >= 0 && ny < CONFIG.BOARD_SIZE && gameState.board[nx][ny] === player) {
+                count++;
+            } else break;
+        }
+
+        if (count >= 5) return true;
+    }
+    return false;
+}
+
+/**
+ * 地狱难度的Minimax（更深搜索）
+ */
+function hellMinimax(aiPlayer) {
+    let bestMove = null, bestScore = -Infinity;
+    const candidates = getCandidates(aiPlayer, HELL_AI.CANDIDATE_LIMIT);
+
+    for (const { x, y } of candidates) {
+        gameState.board[x][y] = aiPlayer;
+        const score = minimaxHell(HELL_AI.SEARCH_DEPTH - 1, -Infinity, Infinity, false, aiPlayer);
+        gameState.board[x][y] = 0;
+        if (score > bestScore) {
+            bestScore = score;
+            bestMove = { x, y };
+        }
+    }
+    return bestMove || { x: 7, y: 7 };
+}
+
+/**
+ * 地狱难度专用Minimax
+ */
+function minimaxHell(depth, alpha, beta, isMaximizing, aiPlayer) {
+    aiStats.nodeCount++;
+
+    const opponent = gameState.playerColor;
+
+    // 检查胜负
+    if (hasImmediateWin(aiPlayer)) return HELL_AI.WIN_SCORE + depth;
+    if (hasImmediateWin(opponent)) return -HELL_AI.WIN_SCORE - depth;
+
+    // 深度为0时评估
+    if (depth === 0) return evaluateBoardAdvanced(aiPlayer);
+
+    const candidates = getCandidates(aiPlayer, HELL_AI.SEARCH_LIMIT);
+    if (candidates.length === 0) return evaluateBoardAdvanced(aiPlayer);
+
+    if (isMaximizing) {
+        let maxScore = -Infinity;
+        for (const { x, y } of candidates) {
+            gameState.board[x][y] = aiPlayer;
+            const score = minimaxHell(depth - 1, alpha, beta, false, aiPlayer);
+            gameState.board[x][y] = 0;
+            maxScore = Math.max(maxScore, score);
+            alpha = Math.max(alpha, score);
+            if (beta <= alpha) break;
+        }
+        return maxScore;
+    } else {
+        let minScore = Infinity;
+        for (const { x, y } of candidates) {
+            gameState.board[x][y] = opponent;
+            const score = minimaxHell(depth - 1, alpha, beta, true, aiPlayer);
+            gameState.board[x][y] = 0;
+            minScore = Math.min(minScore, score);
+            beta = Math.min(beta, score);
+            if (beta <= alpha) break;
+        }
+        return minScore;
+    }
+}
+
+/**
+ * 高级棋盘评估（用于地狱难度）
+ */
+function evaluateBoardAdvanced(aiPlayer) {
+    let score = 0;
+    const opponent = gameState.playerColor;
+
+    // 基础评估
+    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
+        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
+            if (gameState.board[i][j] === aiPlayer) {
+                score += evaluatePosition(i, j, aiPlayer);
+                // 位置价值：中心位置更有价值
+                score += (7 - Math.abs(i - 7)) * 10 + (7 - Math.abs(j - 7)) * 10;
+            } else if (gameState.board[i][j] === opponent) {
+                score -= evaluatePosition(i, j, opponent) * 1.1; // 对手棋型略微高估
+                score -= (7 - Math.abs(i - 7)) * 10 + (7 - Math.abs(j - 7)) * 10;
+            } else if (hasNeighbor(i, j)) {
+                const attack = evaluatePoint(i, j, aiPlayer);
+                const defense = evaluatePoint(i, j, opponent);
+                score += attack * 0.5 - defense * 0.6;
+            }
+        }
+    }
+
+    // 威胁评估
+    const myThreats = countThreats(aiPlayer);
+    const oppThreats = countThreats(opponent);
+
+    score += myThreats.liveFour * SCORES.LIVE_FOUR * 0.5;
+    score += myThreats.rushFour * SCORES.RUSH_FOUR * 0.3;
+    score += myThreats.liveThree * SCORES.LIVE_THREE * 0.2;
+
+    score -= oppThreats.liveFour * SCORES.LIVE_FOUR * 0.6;
+    score -= oppThreats.rushFour * SCORES.RUSH_FOUR * 0.4;
+    score -= oppThreats.liveThree * SCORES.LIVE_THREE * 0.3;
+
+    return score;
+}
+
+/**
+ * 统计威胁数量
+ */
+function countThreats(player) {
+    let liveFour = 0, rushFour = 0, liveThree = 0;
+
+    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
+        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
+            if (gameState.board[i][j] !== 0) continue;
+            if (!hasNeighbor(i, j)) continue;
+
+            const directions = [[1, 0], [0, 1], [1, 1], [1, -1]];
+            for (const [dx, dy] of directions) {
+                const lineScore = evaluateLine(i, j, dx, dy, player);
+                if (lineScore >= SCORES.LIVE_FOUR) liveFour++;
+                else if (lineScore >= SCORES.RUSH_FOUR) rushFour++;
+                else if (lineScore >= SCORES.LIVE_THREE) liveThree++;
+            }
+        }
+    }
+
+    return { liveFour, rushFour, liveThree };
 }
 
 /**
@@ -980,21 +1589,24 @@ function minimax(depth, alpha, beta, isMaximizing, aiPlayer) {
 }
 
 /**
- * 获取候选落子位置
+ * 获取候选落子位置（增强版）
  */
 function getCandidates(aiPlayer, limit) {
     const candidates = [];
+    const opponent = gameState.playerColor;
+
     for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
         for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
             if (gameState.board[i][j] === 0 && hasNeighbor(i, j)) {
-                const opponent = gameState.playerColor;
                 const attack = evaluatePoint(i, j, aiPlayer);
                 const defense = evaluatePoint(i, j, opponent);
-                const score = attack + defense * 1.2;
-                candidates.push({ x: i, y: j, score });
+                // 防守权重提高到1.5，更积极堵截对手
+                const score = attack * 1.1 + defense * 1.5;
+                candidates.push({ x: i, y: j, score, attack, defense });
             }
         }
     }
+
     candidates.sort((a, b) => b.score - a.score);
     if (typeof limit === 'number') return candidates.slice(0, limit);
     return candidates;
