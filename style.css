@@ -1190,6 +1190,8 @@ button.action-btn:hover:not(:disabled) {
     padding: 15px;
     border: 1px solid rgba(102, 126, 234, 0.3);
     box-shadow: 0 0 30px rgba(102, 126, 234, 0.1);
+    /* 固定高度防止抖动 */
+    min-height: 280px;
 }
 
 .ai-pressure-panel.show {
@@ -1225,13 +1227,17 @@ button.action-btn:hover:not(:disabled) {
     font-size: 11px;
     color: #a8e6cf;
     line-height: 1.6;
-    min-height: 60px;
+    /* 固定高度防止抖动 */
+    min-height: 85px;
+    white-space: pre-wrap;
 }
 
 .pressure-stats {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    /* 固定高度 */
+    min-height: 80px;
 }
 
 .pressure-stats .stat {
@@ -1344,7 +1350,7 @@ button.action-btn:hover:not(:disabled) {
 /* 手机设备 */
 @media (max-width: 480px) {
     body {
-        padding: 10px;
+        padding: 5px;
     }
 
     /* 开始界面 */
@@ -1511,6 +1517,8 @@ button.action-btn:hover:not(:disabled) {
         width: 100%;
         padding: 12px;
         border-radius: 10px;
+        /* 固定高度防止抖动 */
+        min-height: 140px;
     }
 
     .ai-pressure-panel.show {
@@ -1528,12 +1536,15 @@ button.action-btn:hover:not(:disabled) {
 
     .pressure-title {
         font-size: 12px;
+        /* 固定宽度 */
+        min-width: 80px;
     }
 
     .pressure-formula {
         font-size: 10px;
         padding: 10px;
-        min-height: 50px;
+        /* 固定高度防止抖动 */
+        min-height: 70px;
         margin-bottom: 10px;
     }
 
@@ -1541,6 +1552,8 @@ button.action-btn:hover:not(:disabled) {
         flex-direction: row;
         flex-wrap: wrap;
         gap: 5px;
+        /* 固定高度 */
+        min-height: 36px;
     }
 
     .pressure-stats .stat {
