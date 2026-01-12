@@ -17,7 +17,10 @@ const CONFIG = {
 
 // 根据屏幕宽度调整棋盘大小
 function adjustBoardSize() {
-    const maxWidth = Math.min(window.innerWidth - 40, 600); // 留出边距
+    const isMobile = window.innerWidth <= 480;
+    // 手机端减少边距，让棋盘更大；留出更少边距
+    const margin = isMobile ? 20 : 40;
+    const maxWidth = Math.min(window.innerWidth - margin, 600);
     const idealBoardWidth = (CONFIG.BOARD_SIZE - 1) * 38 + 60; // 原始尺寸
 
     if (maxWidth < idealBoardWidth) {
@@ -126,11 +129,11 @@ const HARD_AI = {
 
 // 地狱难度配置
 const HELL_AI = {
-    SEARCH_DEPTH: 8,      // 更深的搜索
-    CANDIDATE_LIMIT: 30,  // 更多候选
-    SEARCH_LIMIT: 20,     // 更多分支
-    VCF_DEPTH: 20,        // VCF搜索深度（连续冲四）
-    VCT_DEPTH: 12,        // VCT搜索深度（连续威胁）
+    SEARCH_DEPTH: 6,      // 降低到6层，但配合更智能的策略
+    CANDIDATE_LIMIT: 20,  // 减少候选
+    SEARCH_LIMIT: 12,     // 减少分支
+    VCF_DEPTH: 12,        // VCF搜索深度（降低以保证性能）
+    VCT_DEPTH: 6,         // VCT搜索深度（大幅降低）
     WIN_SCORE: SCORES.FIVE * 10
 };
 
@@ -201,10 +204,10 @@ Attack = Σ PatternScore(d)
   max/min(minimax(s', d-1, α, β))
 剪枝: α ≥ β
 威胁检测: 活四、双三、四三`,
-    hell: `VCF: 连续冲四搜索(depth=20)
-VCT: 连续威胁搜索(depth=12)
-Minimax(depth=8) + α-β剪枝
-开局库 + 必胜路径计算`
+    hell: `VCF: 连续冲四搜索(depth=12)
+VCT: 连续威胁搜索(depth=6)
+Minimax(depth=6) + α-β剪枝
+开局库 + 组合杀检测`
 };
 
 const PRESSURE_TIPS = {
@@ -1091,8 +1094,8 @@ const OPENING_BOOK = {
 };
 
 /**
- * 地狱AI：VCF/VCT + 深度Minimax
- * 接近无敌的AI
+ * 地狱AI：VCF/VCT + 深度Minimax（优化版）
+ * 接近无敌的AI，但保证性能
  */
 function getHellMove(aiPlayer) {
     const opponent = gameState.playerColor;
@@ -1111,7 +1114,6 @@ function getHellMove(aiPlayer) {
                 }
             }
         }
-        // 默认靠近对手
         return findBestOpeningMove(aiPlayer);
     }
 
@@ -1123,39 +1125,31 @@ function getHellMove(aiPlayer) {
     const immediateBlock = findImmediateWin(opponent);
     if (immediateBlock) return immediateBlock;
 
-    // 3. VCF搜索：找己方必胜的连续冲四路径
-    const vcfMove = searchVCF(aiPlayer, HELL_AI.VCF_DEPTH);
-    if (vcfMove) return vcfMove;
-
-    // 4. 检测并阻止对手的VCF
-    const opponentVCF = searchVCF(opponent, HELL_AI.VCF_DEPTH);
-    if (opponentVCF) {
-        // 对手有VCF，必须防守
-        const blockMove = findBestBlock(opponent, opponentVCF);
-        if (blockMove) return blockMove;
-    }
-
-    // 5. VCT搜索：找己方的连续威胁路径
-    const vctMove = searchVCT(aiPlayer, HELL_AI.VCT_DEPTH);
-    if (vctMove) return vctMove;
-
-    // 6. 检测对手活四
-    const opponentLiveFour = findThreat(opponent, SCORES.LIVE_FOUR);
-    if (opponentLiveFour) return opponentLiveFour;
-
-    // 7. 自己形成活四
+    // 3. 自己能形成活四 → 必杀
     const myLiveFour = findThreat(aiPlayer, SCORES.LIVE_FOUR);
     if (myLiveFour) return myLiveFour;
 
-    // 8. 检测对手组合威胁
-    const opponentCombo = findComboThreat(opponent);
-    if (opponentCombo) return opponentCombo;
+    // 4. 对手有活四 → 必须堵
+    const opponentLiveFour = findThreat(opponent, SCORES.LIVE_FOUR);
+    if (opponentLiveFour) return opponentLiveFour;
 
-    // 9. 自己形成组合威胁
+    // 5. VCF搜索：找己方必胜的连续冲四路径（限制深度）
+    const vcfMove = searchVCF(aiPlayer, HELL_AI.VCF_DEPTH);
+    if (vcfMove) return vcfMove;
+
+    // 6. 自己能形成双三/四三 → 组合杀
     const myCombo = findComboThreat(aiPlayer);
     if (myCombo) return myCombo;
 
-    // 10. 深度Minimax搜索
+    // 7. 对手有双三/四三 → 必须堵
+    const opponentCombo = findComboThreat(opponent);
+    if (opponentCombo) return opponentCombo;
+
+    // 8. VCT搜索（轻量版）
+    const vctMove = searchVCTLight(aiPlayer, HELL_AI.VCT_DEPTH);
+    if (vctMove) return vctMove;
+
+    // 9. 深度Minimax搜索
     return hellMinimax(aiPlayer);
 }
 
@@ -1265,55 +1259,30 @@ function findAllRushFours(player) {
 }
 
 /**
- * VCT搜索 - Victory by Continuous Threat
- * 搜索连续威胁（活三、冲四）直到获胜的路径
+ * VCT搜索（轻量版）- Victory by Continuous Threat
+ * 只搜索最有希望的几个威胁点
  */
-function searchVCT(player, maxDepth) {
-    const opponent = player === 1 ? 2 : 1;
+function searchVCTLight(player, maxDepth) {
+    // 先检查是否有直接的VCF
+    const vcfResult = searchVCF(player, Math.min(maxDepth, 8));
+    if (vcfResult) return vcfResult;
 
-    function vctSearch(depth, isAttacker) {
-        aiStats.nodeCount++;
+    // 找最好的几个威胁点
+    const threats = findAllThreats(player).slice(0, 5);
 
-        if (depth <= 0) return null;
+    for (const move of threats) {
+        gameState.board[move.x][move.y] = player;
 
-        // 先尝试VCF
-        const vcfResult = searchVCF(player, Math.min(depth, 10));
-        if (vcfResult) return vcfResult;
+        // 检查落子后是否形成必杀局面
+        const hasWinningThreat = findThreat(player, SCORES.LIVE_FOUR) !== null;
+        const hasVCF = hasWinningThreat || searchVCF(player, 6) !== null;
 
-        if (isAttacker) {
-            // 寻找威胁点（活三或冲四）
-            const threats = findAllThreats(player);
+        gameState.board[move.x][move.y] = 0;
 
-            for (const move of threats) {
-                gameState.board[move.x][move.y] = player;
-
-                // 检查是否形成必杀
-                if (hasImmediateWin(player)) {
-                    gameState.board[move.x][move.y] = 0;
-                    return move;
-                }
-
-                // 对手必须防守
-                const mustBlock = findMustBlockPoint(player);
-                if (mustBlock) {
-                    gameState.board[mustBlock.x][mustBlock.y] = opponent;
-
-                    const result = vctSearch(depth - 2, true);
-
-                    gameState.board[mustBlock.x][mustBlock.y] = 0;
-                    gameState.board[move.x][move.y] = 0;
-
-                    if (result) return move;
-                } else {
-                    gameState.board[move.x][move.y] = 0;
-                }
-            }
-        }
-
-        return null;
+        if (hasVCF) return move;
     }
 
-    return vctSearch(maxDepth, true);
+    return null;
 }
 
 /**
@@ -1336,64 +1305,6 @@ function findAllThreats(player) {
 
     moves.sort((a, b) => b.score - a.score);
     return moves.slice(0, 15); // 限制数量以保证性能
-}
-
-/**
- * 找到必须防守的点
- */
-function findMustBlockPoint(player) {
-    // 检查活四
-    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
-        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
-            if (gameState.board[i][j] !== 0) continue;
-            if (!hasNeighbor(i, j)) continue;
-
-            const score = evaluatePoint(i, j, player);
-            if (score >= SCORES.LIVE_FOUR) {
-                return { x: i, y: j };
-            }
-        }
-    }
-
-    // 检查冲四
-    return findImmediateWin(player);
-}
-
-/**
- * 找到最佳防守点
- */
-function findBestBlock(attacker, threatMove) {
-    const defender = attacker === 1 ? 2 : 1;
-
-    // 找到所有可能的防守点
-    const blockCandidates = [];
-
-    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
-        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
-            if (gameState.board[i][j] !== 0) continue;
-            if (!hasNeighbor(i, j)) continue;
-
-            gameState.board[i][j] = defender;
-
-            // 检查这个防守是否能阻止VCF
-            const stillHasVCF = searchVCF(attacker, 10);
-
-            gameState.board[i][j] = 0;
-
-            if (!stillHasVCF) {
-                const score = evaluatePoint(i, j, defender);
-                blockCandidates.push({ x: i, y: j, score });
-            }
-        }
-    }
-
-    if (blockCandidates.length > 0) {
-        blockCandidates.sort((a, b) => b.score - a.score);
-        return blockCandidates[0];
-    }
-
-    // 如果找不到完美防守，至少堵住最紧急的威胁
-    return findThreat(attacker, SCORES.RUSH_FOUR) || threatMove;
 }
 
 /**
