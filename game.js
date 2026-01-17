@@ -91,20 +91,20 @@ let selectedDifficulty = 'easy';
 // ==================== 算法信息 ====================
 const ALGORITHM_INFO = {
     easy: {
-        name: '评分算法 + 随机选择',
-        desc: '计算每个位置的进攻和防守分数，从最高分的前3个位置中随机选择。时间复杂度 O(n²)'
+        name: '评分算法 + 偶尔失误',
+        desc: '能识别连五和活四威胁，80%选最佳位置，20%从前3个随机选。时间复杂度 O(n²)'
     },
     medium: {
-        name: '启发式评估函数',
-        desc: '识别棋型（活四、冲四、活三等），为每种棋型赋分，选择得分最高的位置。时间复杂度 O(n²)'
+        name: '启发式评估 + 活四检测',
+        desc: '识别连五和活四威胁，始终选择得分最高的位置，但不识别冲四和组合威胁。时间复杂度 O(n²)'
     },
     hard: {
-        name: 'Minimax + Alpha-Beta + 威胁检测',
-        desc: '博弈树搜索6层深度，Alpha-Beta剪枝优化，主动识别活四、双三、四三等必杀棋型。时间复杂度 O(b^d)'
+        name: 'Minimax + Alpha-Beta + 组合威胁',
+        desc: '博弈树搜索4层深度，Alpha-Beta剪枝优化，主动识别双冲四、四三、双活三等组合杀招。时间复杂度 O(b^d)'
     },
     hell: {
         name: 'VCF/VCT + 深度Minimax',
-        desc: '专业级算法：VCF连续冲四必杀搜索、VCT连续威胁搜索、8层博弈树、开局库。理论上先手必胜。'
+        desc: '专业级算法：VCF连续冲四必杀搜索(深度8)、VCT连续威胁搜索(深度4)、6层博弈树、开局库。理论上先手必胜。'
     }
 };
 
@@ -112,13 +112,20 @@ const ALGORITHM_INFO = {
 const SCORES = {
     FIVE: 1000000,       // 连五 - 立即获胜
     OPEN_FOUR: 100000,   // 活四 - 无法防守
+    LIVE_FOUR: 100000,   // 活四（兼容旧名称）
     SIMPLE_FOUR: 10000,  // 冲四 - 必须防守
+    RUSH_FOUR: 10000,    // 冲四（兼容旧名称）
     BROKEN_THREE: 1000,  // 跳活三 - 潜在威胁
     OPEN_THREE: 800,     // 活三 - 需要关注
+    LIVE_THREE: 800,     // 活三（兼容旧名称）
     SIMPLE_THREE: 100,   // 眠三
+    SLEEP_THREE: 100,    // 眠三（兼容旧名称）
     OPEN_TWO: 50,        // 活二
+    LIVE_TWO: 50,        // 活二（兼容旧名称）
     SIMPLE_TWO: 10,      // 眠二
-    OPEN_ONE: 5          // 活一
+    SLEEP_TWO: 10,       // 眠二（兼容旧名称）
+    OPEN_ONE: 5,         // 活一
+    LIVE_ONE: 5          // 活一（兼容旧名称）
 };
 
 // 威胁严重程度排序（用于反击判断）
@@ -207,27 +214,28 @@ document.addEventListener('keydown', (e) => {
 
 // ==================== AI压迫感面板 ====================
 const PRESSURE_FORMULAS = {
-    easy: `Score(p) = Attack(p) + 1.0×Defense(p)
-选择: random(top 3) / best`,
-    medium: `Score(p) = 1.1×Attack(p) + Defense(p)
-Attack = Σ PatternScore(d)
+    easy: `Score(p) = Attack(p) + Defense(p)
+威胁检测: 连五、活四
+选择: 80%最佳 / 20%随机top3`,
+    medium: `Score(p) = 1.2×Attack(p) + Defense(p)
+威胁检测: 连五、活四
 选择: argmax(Score)`,
     hard: `minimax(s, d, α, β) =
   eval(s), if d=0
   max/min(minimax(s', d-1, α, β))
-剪枝: α ≥ β
-威胁检测: 活四、双三、四三`,
-    hell: `VCF: 连续冲四搜索(depth=12)
-VCT: 连续威胁搜索(depth=6)
+威胁检测: 双冲四、四三、双活三
+搜索深度: 4`,
+    hell: `VCF: 连续冲四搜索(depth=8)
+VCT: 连续威胁搜索(depth=4)
 Minimax(depth=6) + α-β剪枝
 开局库 + 组合杀检测`
 };
 
 const PRESSURE_TIPS = {
-    easy: '从最高分的3个位置中随机选择，模拟人类"手滑"',
-    medium: '识别棋型并评分，始终选择得分最高的位置',
-    hard: '深度搜索6层，主动识别并利用组合杀招',
-    hell: '专业级AI，搜索必胜路径，理论上无法战胜'
+    easy: '能识别连五和活四，80%选最佳位置，20%偶尔失误',
+    medium: '识别连五和活四威胁，始终选择得分最高的位置',
+    hard: '深度搜索4层，主动识别并利用双冲四、四三、双活三等组合杀招',
+    hell: '专业级AI，VCF/VCT搜索必胜路径，6层博弈树，理论上无法战胜'
 };
 
 let aiStats = {
@@ -962,6 +970,30 @@ function evaluatePoint(x, y, player) {
     return result.score;
 }
 
+/**
+ * 评估一条线上的棋型（兼容旧代码）
+ */
+function evaluateLine(x, y, dx, dy, player) {
+    return analyzeLinePattern(x, y, dx, dy, player);
+}
+
+/**
+ * 查找特定分数的威胁点（兼容旧代码）
+ */
+function findThreat(player, minScore) {
+    for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
+        for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
+            if (gameState.board[i][j] !== 0) continue;
+            if (!hasNeighbor(i, j)) continue;
+            const score = evaluatePoint(i, j, player);
+            if (score >= minScore) {
+                return { x: i, y: j };
+            }
+        }
+    }
+    return null;
+}
+
 function hasImmediateWin(player) {
     for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
         for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
@@ -1007,51 +1039,91 @@ function getAIMove() {
 }
 
 /**
- * 简单AI：评分算法 + 随机选择
- * 从得分最高的前3个位置中随机选择
+ * 简单AI：基础评分 + 小概率失误
+ * 特点：能正常下棋，但偶尔会选次优位置
+ * 难度定位：新手练习，能撑几个回合
  */
 function getEasyMove(aiPlayer) {
+    const opponent = gameState.playerColor;
     let candidates = [];
+    
+    // 必杀：自己能赢一定要赢
+    const winMove = findImmediateWin(aiPlayer);
+    if (winMove) return winMove;
+    
+    // 必防：对手要赢一定要堵
+    const blockMove = findImmediateWin(opponent);
+    if (blockMove) return blockMove;
+    
+    // 活四也要处理（不然太蠢）
+    const myLiveFour = findThreat(aiPlayer, SCORES.LIVE_FOUR);
+    if (myLiveFour) return myLiveFour;
+    
+    const oppLiveFour = findThreat(opponent, SCORES.LIVE_FOUR);
+    if (oppLiveFour) return oppLiveFour;
+    
     for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
         for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
             if (gameState.board[i][j] === 0 && hasNeighbor(i, j)) {
                 aiStats.nodeCount++;
                 const attack = evaluatePoint(i, j, aiPlayer);
-                const defense = evaluatePoint(i, j, gameState.playerColor);
-                // 提高防守权重，避免过于弱智
-                candidates.push({ x: i, y: j, score: attack + defense * 1.0 });
+                const defense = evaluatePoint(i, j, opponent);
+                // 简单AI：攻防权重相等
+                candidates.push({ x: i, y: j, score: attack + defense });
             }
         }
     }
+    
     if (candidates.length === 0) return { x: 7, y: 7 };
     candidates.sort((a, b) => b.score - a.score);
     
-    // 如果有必杀或必防的棋（分数极高），则减少随机性
-    if (candidates[0].score > SCORES.RUSH_FOUR) {
+    // 简单AI：80%选最佳，20%从前3个随机选（偶尔失误）
+    if (Math.random() < 0.8) {
         return candidates[0];
+    } else {
+        const topN = Math.min(3, candidates.length);
+        return candidates[Math.floor(Math.random() * topN)];
     }
-
-    const topN = Math.min(3, candidates.length);
-    return candidates[Math.floor(Math.random() * topN)];
 }
 
 /**
- * 中等AI：改进的启发式评估
+ * 中等AI：启发式评估 + 基本威胁检测
+ * 特点：总是选择最佳位置，能识别连五和活四
+ * 难度定位：有一定挑战，但不会使用高级战术
  */
 function getMediumMove(aiPlayer) {
-    let bestMove = null, bestScore = -Infinity;
     const opponent = gameState.playerColor;
+    
+    // 1. 必杀检测（连五）
+    const winMove = findImmediateWin(aiPlayer);
+    if (winMove) return winMove;
+    
+    // 2. 必防检测（连五）
+    const blockMove = findImmediateWin(opponent);
+    if (blockMove) return blockMove;
+    
+    // 3. 活四威胁（中等AI能识别活四）
+    const myLiveFour = findThreat(aiPlayer, SCORES.LIVE_FOUR);
+    if (myLiveFour) return myLiveFour;
+    
+    const oppLiveFour = findThreat(opponent, SCORES.LIVE_FOUR);
+    if (oppLiveFour) return oppLiveFour;
+    
+    // 中等AI不检测冲四、双三等高级威胁，这是与困难的区别
+    
+    // 4. 评分选择最佳位置
+    let bestMove = null, bestScore = -Infinity;
     
     for (let i = 0; i < CONFIG.BOARD_SIZE; i++) {
         for (let j = 0; j < CONFIG.BOARD_SIZE; j++) {
             if (gameState.board[i][j] === 0 && hasNeighbor(i, j)) {
                 aiStats.nodeCount++;
                 
-                const myEval = evaluatePointAdvanced(i, j, aiPlayer);
-                const oppEval = evaluatePointAdvanced(i, j, opponent);
+                const attack = evaluatePoint(i, j, aiPlayer);
+                const defense = evaluatePoint(i, j, opponent);
                 
-                // 改进的评分公式
-                const score = myEval.score * 1.1 + oppEval.score * 1.0;
+                // 中等AI：攻击权重略高，更激进但不够全面
+                const score = attack * 1.2 + defense * 1.0;
                 
                 if (score > bestScore) {
                     bestScore = score;
@@ -1064,10 +1136,54 @@ function getMediumMove(aiPlayer) {
 }
 
 /**
- * 困难AI：使用专业级算法
+ * 困难AI：威胁检测 + Minimax搜索
+ * 特点：能识别冲四、双三、四三等组合威胁，使用博弈树搜索
+ * 难度定位：需要认真对待，AI会主动进攻
  */
 function getHardMove(aiPlayer) {
-    return getHardMoveAdvanced(aiPlayer);
+    const opponent = gameState.playerColor;
+    
+    // 1. 必杀检测
+    const winMove = findImmediateWin(aiPlayer);
+    if (winMove) return winMove;
+    
+    // 2. 必防检测
+    const blockMove = findImmediateWin(opponent);
+    if (blockMove) return blockMove;
+    
+    // 3. 活四威胁
+    const myLiveFour = findThreat(aiPlayer, SCORES.LIVE_FOUR);
+    if (myLiveFour) return myLiveFour;
+    
+    const oppLiveFour = findThreat(opponent, SCORES.LIVE_FOUR);
+    if (oppLiveFour) return oppLiveFour;
+    
+    // 4. 冲四威胁（困难AI能识别冲四）
+    const myRushFour = findThreat(aiPlayer, SCORES.RUSH_FOUR);
+    if (myRushFour) return myRushFour;
+    
+    // 5. 组合威胁检测（困难AI的特色）
+    const myDoubleRushFour = findDoubleRushFour(aiPlayer);
+    if (myDoubleRushFour) return myDoubleRushFour;
+    
+    const myFourThree = findFourThreeCombo(aiPlayer);
+    if (myFourThree) return myFourThree;
+    
+    const myDoubleThree = findDoubleThree(aiPlayer);
+    if (myDoubleThree) return myDoubleThree;
+    
+    // 6. 防守对手的组合威胁
+    const oppDoubleRushFour = findDoubleRushFour(opponent);
+    if (oppDoubleRushFour) return oppDoubleRushFour;
+    
+    const oppFourThree = findFourThreeCombo(opponent);
+    if (oppFourThree) return oppFourThree;
+    
+    const oppDoubleThree = findDoubleThree(opponent);
+    if (oppDoubleThree) return oppDoubleThree;
+    
+    // 7. 使用Minimax搜索（深度4）
+    return hardMinimax(aiPlayer);
 }
 
 /**
@@ -1468,7 +1584,8 @@ const OPENING_BOOK = {
 
 /**
  * 地狱AI：VCF/VCT + 深度Minimax（重新设计）
- * 真正的无敌AI
+ * 特点：VCF连续冲四搜索、VCT连续威胁搜索、深度6博弈树、开局库
+ * 难度定位：专业级AI，理论上先手必胜
  */
 function getHellMove(aiPlayer) {
     const opponent = gameState.playerColor;
@@ -1526,15 +1643,15 @@ function getHellMove(aiPlayer) {
     const opponentDoubleThree = findDoubleThree(opponent);
     if (opponentDoubleThree) return opponentDoubleThree;
 
-    // 7. VCF搜索：找己方必胜的连续冲四路径
+    // 7. VCF搜索：找己方必胜的连续冲四路径（地狱特有）
     const vcfMove = searchVCFImproved(aiPlayer, HELL_AI.VCF_DEPTH);
     if (vcfMove) return vcfMove;
 
-    // 8. VCT搜索：找连续威胁路径
+    // 8. VCT搜索：找连续威胁路径（地狱特有）
     const vctMove = searchVCTImproved(aiPlayer, HELL_AI.VCT_DEPTH);
     if (vctMove) return vctMove;
 
-    // 9. 深度Minimax搜索
+    // 9. 深度Minimax搜索（深度6，比困难更深）
     return hellMinimaxImproved(aiPlayer);
 }
 
