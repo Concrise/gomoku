@@ -1,29 +1,57 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>五子棋</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="theme-color" content="#0a0a0f" id="themeColor">
+    <title>五子棋 · Gomoku</title>
     <link rel="stylesheet" href="style.css">
+    <script>
+        // 立即检测系统主题，防止闪烁
+        (function() {
+            const saved = localStorage.getItem('gomoku-theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const theme = saved || (prefersDark ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', theme);
+            document.getElementById('themeColor').content = theme === 'dark' ? '#0a0a0f' : '#f8f6f2';
+        })();
+    </script>
 </head>
 <body>
     <!-- 开始界面 -->
     <div class="start-screen" id="startScreen">
+        <!-- 装饰元素 -->
+        <div class="decor-circle decor-1"></div>
+        <div class="decor-circle decor-2"></div>
+        <div class="decor-line decor-3"></div>
+        
+        <!-- 主题切换按钮 -->
+        <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="切换主题">
+            <span class="theme-icon sun">☀️</span>
+            <span class="theme-icon moon">🌙</span>
+        </button>
+        
         <h1>五子棋</h1>
-        <p class="subtitle">GOMOKU</p>
+        <p class="subtitle">GOMOKU · 黑白之间的艺术</p>
         <div class="menu-container">
             <div id="mainMenu">
                 <p class="menu-title">选择游戏模式</p>
                 <button class="menu-btn pvp" onclick="startGame('pvp')">
+                    <span class="btn-icon">⚔️</span>
                     双人对战
                     <span class="desc">与朋友在同一设备对战</span>
                 </button>
                 <button class="menu-btn pve" onclick="showDifficultyMenu()">
+                    <span class="btn-icon">🤖</span>
                     人机对战
                     <span class="desc">挑战AI对手</span>
                 </button>
                 <button class="menu-btn docs" onclick="showAlgorithmDocs()">
-                    📖 算法说明书
+                    <span class="btn-icon">📖</span>
+                    算法说明书
                     <span class="desc">了解AI背后的算法原理</span>
                 </button>
             </div>
@@ -397,10 +425,20 @@ function evaluateLine(position, direction):
 
     <!-- 游戏界面 -->
     <div class="game-wrapper" id="gameWrapper">
+        <!-- 装饰元素 -->
+        <div class="decor-circle decor-game-1"></div>
+        <div class="decor-circle decor-game-2"></div>
+        
         <div class="game-container">
             <div class="game-header">
                 <h1>五子棋</h1>
-                <button class="exit-btn" onclick="exitGame()">退出游戏</button>
+                <div class="header-actions">
+                    <button class="theme-toggle-mini" onclick="toggleTheme()" aria-label="切换主题">
+                        <span class="theme-icon sun">☀️</span>
+                        <span class="theme-icon moon">🌙</span>
+                    </button>
+                    <button class="exit-btn" onclick="exitGame()">退出游戏</button>
+                </div>
             </div>
             <div class="mode-info">
                 <span id="modeLabel">双人对战</span>
