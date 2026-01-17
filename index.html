@@ -12,13 +12,21 @@
     <script>
         // 立即检测系统主题，防止闪烁
         (function() {
-            const saved = localStorage.getItem('gomoku-theme');
-            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            const theme = saved || (prefersDark ? 'dark' : 'light');
+            const prefersDarkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+            let storedTheme = null;
+            try {
+                storedTheme = localStorage.getItem('gomoku-theme');
+            } catch (err) {
+                console.warn('无法访问 localStorage，主题切换偏好无法持久化。', err);
+            }
+            const normalized = storedTheme === 'dark' || storedTheme === 'light' ? storedTheme : null;
+            const theme = normalized || (prefersDarkQuery.matches ? 'dark' : 'light');
             document.documentElement.setAttribute('data-theme', theme);
             // 等待body加载后也设置
             document.addEventListener('DOMContentLoaded', function() {
-                document.body.setAttribute('data-theme', theme);
+                if (document.body) {
+                    document.body.setAttribute('data-theme', theme);
+                }
             });
             const themeColorMeta = document.getElementById('themeColor');
             if (themeColorMeta) {
