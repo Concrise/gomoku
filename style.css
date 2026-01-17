@@ -1,6 +1,6 @@
 /* ==================== CSS变量 - 高级主题系统 ==================== */
 :root {
-    /* 深色主题 - 奢华暗夜 */
+    /* 深色主题 - 奢华暗夜 (默认) */
     --bg-primary: #0a0a0f;
     --bg-secondary: #12121a;
     --bg-tertiary: #1a1a24;
@@ -36,8 +36,8 @@
     --decor-opacity: 0.03;
 }
 
+/* 浅色主题 - 典雅象牙 */
 [data-theme="light"] {
-    /* 浅色主题 - 典雅象牙 */
     --bg-primary: #f8f6f2;
     --bg-secondary: #f0ece4;
     --bg-tertiary: #e8e2d8;
@@ -84,12 +84,15 @@ html {
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
     overflow-x: hidden;
-    transition: background-color 0.4s ease;
+    transition: background-color 0.4s ease, color 0.4s ease;
 }
 
-body {
+/* 确保body也响应主题变化 */
+body,
+[data-theme="light"] body {
     font-family: 'SF Pro Display', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif;
     background: var(--bg-primary);
+    color: var(--text-primary);
     min-height: 100vh;
     min-height: 100dvh;
     display: flex;
@@ -98,7 +101,7 @@ body {
     padding: 20px;
     overscroll-behavior: none;
     -webkit-overflow-scrolling: touch;
-    transition: background-color 0.4s ease;
+    transition: background-color 0.4s ease, color 0.4s ease;
     position: relative;
 }
 
