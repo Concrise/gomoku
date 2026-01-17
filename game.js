@@ -112,11 +112,17 @@ function toggleTheme() {
 }
 
 function applyTheme(theme) {
+    // 同时设置html和body的data-theme属性，确保CSS变量正确继承
     document.documentElement.setAttribute('data-theme', theme);
+    document.body.setAttribute('data-theme', theme);
+    
     const themeColor = document.getElementById('themeColor');
     if (themeColor) {
         themeColor.content = theme === 'dark' ? '#0a0a0f' : '#f8f6f2';
     }
+    
+    // 更新currentTheme变量以保持同步
+    currentTheme = theme;
 }
 
 // 获取当前主题的棋盘颜色
