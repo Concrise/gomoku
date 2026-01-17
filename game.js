@@ -12,31 +12,124 @@ const CONFIG = {
     BOARD_SIZE: 15,
     CELL_SIZE: 38,
     PADDING: 30,
-    PIECE_RADIUS: 16
+    PIECE_RADIUS: 16,
+    // 缓存计算结果防止重复计算
+    _cachedWidth: 0,
+    _cachedScale: 1
 };
 
-// 根据屏幕宽度调整棋盘大小
+// 根据屏幕宽度调整棋盘大小 - 优化版
 function adjustBoardSize() {
-    const isMobile = window.innerWidth <= 480;
-    // 手机端减少边距，让棋盘更大；留出更少边距
-    const margin = isMobile ? 20 : 40;
-    const maxWidth = Math.min(window.innerWidth - margin, 600);
-    const idealBoardWidth = (CONFIG.BOARD_SIZE - 1) * 38 + 60; // 原始尺寸
-
-    if (maxWidth < idealBoardWidth) {
-        const scale = maxWidth / idealBoardWidth;
-        CONFIG.CELL_SIZE = Math.floor(38 * scale);
-        CONFIG.PADDING = Math.floor(30 * scale);
-        CONFIG.PIECE_RADIUS = Math.floor(16 * scale);
+    const screenWidth = window.innerWidth;
+    const screenHeight = window.innerHeight;
+    const isMobile = screenWidth <= 480;
+    const isSmallMobile = screenWidth <= 360;
+    
+    // 移动端：棋盘要足够大，防止误触
+    // 计算可用空间（考虑页面其他元素）
+    let availableWidth, availableHeight;
+    
+    if (isMobile) {
+        // 手机端：留出最小边距，让棋盘尽可能大
+        const horizontalPadding = isSmallMobile ? 10 : 16;
+        const containerPadding = isSmallMobile ? 16 : 20; // game-container padding
+        availableWidth = screenWidth - horizontalPadding * 2 - containerPadding * 2;
+        
+        // 考虑垂直空间（状态栏、按钮等大约占用200px）
+        availableHeight = screenHeight - 280;
     } else {
-        CONFIG.CELL_SIZE = 38;
-        CONFIG.PADDING = 30;
-        CONFIG.PIECE_RADIUS = 16;
+        // 桌面端
+        availableWidth = Math.min(screenWidth - 80, 600);
+        availableHeight = screenHeight - 200;
     }
+    
+    // 取宽高中较小的值，确保棋盘是正方形且不超出屏幕
+    const maxBoardSize = Math.min(availableWidth, availableHeight, 600);
+    
+    // 原始棋盘尺寸
+    const idealBoardWidth = (CONFIG.BOARD_SIZE - 1) * 38 + 60;
+    
+    // 计算缩放比例
+    let scale;
+    if (maxBoardSize < idealBoardWidth) {
+        scale = maxBoardSize / idealBoardWidth;
+    } else {
+        scale = 1;
+    }
+    
+    // 移动端最小格子尺寸，防止误触（至少24px）
+    const minCellSize = isMobile ? 24 : 20;
+    const calculatedCellSize = Math.floor(38 * scale);
+    
+    if (calculatedCellSize < minCellSize && isMobile) {
+        // 如果格子太小，强制使用最小尺寸
+        scale = minCellSize / 38;
+    }
+    
+    // 应用缩放
+    CONFIG.CELL_SIZE = Math.max(Math.floor(38 * scale), minCellSize);
+    CONFIG.PADDING = Math.max(Math.floor(30 * scale), 15);
+    CONFIG.PIECE_RADIUS = Math.max(Math.floor(16 * scale), 10);
+    
+    // 缓存计算结果
+    CONFIG._cachedWidth = (CONFIG.BOARD_SIZE - 1) * CONFIG.CELL_SIZE + CONFIG.PADDING * 2;
+    CONFIG._cachedScale = scale;
 }
 
 // 高清适配
 const dpr = window.devicePixelRatio || 1;
+
+// ==================== 主题系统 ====================
+let currentTheme = 'dark';
+
+function initTheme() {
+    const saved = localStorage.getItem('gomoku-theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    currentTheme = saved || (prefersDark ? 'dark' : 'light');
+    applyTheme(currentTheme);
+    
+    // 监听系统主题变化
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+        if (!localStorage.getItem('gomoku-theme')) {
+            currentTheme = e.matches ? 'dark' : 'light';
+            applyTheme(currentTheme);
+            if (elements.canvas && elements.gameWrapper?.classList.contains('show')) {
+                drawBoard();
+            }
+        }
+    });
+}
+
+function toggleTheme() {
+    currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('gomoku-theme', currentTheme);
+    applyTheme(currentTheme);
+    
+    // 重绘棋盘以适应新主题
+    if (elements.canvas && elements.gameWrapper?.classList.contains('show')) {
+        drawBoard();
+    }
+}
+
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    const themeColor = document.getElementById('themeColor');
+    if (themeColor) {
+        themeColor.content = theme === 'dark' ? '#0a0a0f' : '#f8f6f2';
+    }
+}
+
+// 获取当前主题的棋盘颜色
+function getBoardColors() {
+    const isDark = currentTheme === 'dark';
+    return {
+        background: isDark ? '#d4a855' : '#e8c170',
+        line: isDark ? '#8b6914' : '#5d4e37',
+        border: isDark ? '#8b7355' : '#6b5010',
+        starPoint: isDark ? '#6b5010' : '#5d4e37',
+        woodGrain: isDark ? 35 : 40
+    };
+}
 
 // ==================== DOM 元素 ====================
 const elements = {
@@ -338,12 +431,15 @@ function init() {
     // 调整棋盘大小以适应屏幕
     adjustBoardSize();
 
-    // 高清Canvas设置
-    const cssWidth = (CONFIG.BOARD_SIZE - 1) * CONFIG.CELL_SIZE + CONFIG.PADDING * 2;
+    // 使用缓存的宽度
+    const cssWidth = CONFIG._cachedWidth;
 
     if (elements.canvas) {
+        // 先设置CSS尺寸，再设置canvas尺寸，防止闪烁
         elements.canvas.style.width = cssWidth + 'px';
         elements.canvas.style.height = cssWidth + 'px';
+        
+        // 高清Canvas设置
         elements.canvas.width = cssWidth * dpr;
         elements.canvas.height = cssWidth * dpr;
         ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -378,18 +474,19 @@ function init() {
 function drawBoard() {
     const { BOARD_SIZE, CELL_SIZE, PADDING } = CONFIG;
     const boardWidth = (BOARD_SIZE - 1) * CELL_SIZE + PADDING * 2;
+    const colors = getBoardColors();
 
     ctx.save();
 
     // 底色
-    ctx.fillStyle = '#e8c170';
+    ctx.fillStyle = colors.background;
     ctx.fillRect(0, 0, boardWidth, boardWidth);
 
     // 木纹纹理
-    ctx.globalAlpha = 0.3;
+    ctx.globalAlpha = 0.25;
     for (let i = 0; i < boardWidth; i += 4) {
         ctx.beginPath();
-        ctx.strokeStyle = `hsl(35, 60%, ${45 + Math.random() * 15}%)`;
+        ctx.strokeStyle = `hsl(${colors.woodGrain}, 55%, ${42 + Math.random() * 12}%)`;
         ctx.lineWidth = 1 + Math.random() * 2;
         ctx.moveTo(0, i + Math.random() * 3);
 
@@ -401,14 +498,14 @@ function drawBoard() {
     ctx.globalAlpha = 1;
 
     // 棋盘边框
-    ctx.strokeStyle = '#8b6914';
+    ctx.strokeStyle = colors.border;
     ctx.lineWidth = 3;
     ctx.strokeRect(PADDING - 10, PADDING - 10,
         (BOARD_SIZE - 1) * CELL_SIZE + 20,
         (BOARD_SIZE - 1) * CELL_SIZE + 20);
 
     // 网格线
-    ctx.strokeStyle = '#5d4e37';
+    ctx.strokeStyle = colors.line;
     ctx.lineWidth = 1;
 
     for (let i = 0; i < BOARD_SIZE; i++) {
@@ -425,7 +522,7 @@ function drawBoard() {
 
     // 星位点
     const starPoints = [[3, 3], [3, 7], [3, 11], [7, 3], [7, 7], [7, 11], [11, 3], [11, 7], [11, 11]];
-    ctx.fillStyle = '#5d4e37';
+    ctx.fillStyle = colors.starPoint;
     starPoints.forEach(([x, y]) => {
         ctx.beginPath();
         ctx.arc(PADDING + x * CELL_SIZE, PADDING + y * CELL_SIZE, 5, 0, Math.PI * 2);
@@ -551,12 +648,14 @@ function drawPiece(x, y, player, isWinning = false, isLast = false) {
 
     // 获胜高亮
     if (isWinning) {
+        const isDark = currentTheme === 'dark';
+        const glowColor = isDark ? '#c9a962' : '#8b6914';
         ctx.beginPath();
         ctx.arc(centerX, centerY, r + 4, 0, Math.PI * 2);
-        ctx.strokeStyle = '#ffd700';
+        ctx.strokeStyle = glowColor;
         ctx.lineWidth = 4;
-        ctx.shadowColor = '#ffd700';
-        ctx.shadowBlur = 15;
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = 18;
         ctx.stroke();
         ctx.shadowBlur = 0;
     }
@@ -570,16 +669,18 @@ function drawWinningLine() {
     const { CELL_SIZE, PADDING } = CONFIG;
     const first = gameState.winningLine[0];
     const last = gameState.winningLine[gameState.winningLine.length - 1];
+    const isDark = currentTheme === 'dark';
+    const glowColor = isDark ? 'rgba(201, 169, 98, 0.9)' : 'rgba(139, 105, 20, 0.9)';
 
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(PADDING + first[0] * CELL_SIZE, PADDING + first[1] * CELL_SIZE);
     ctx.lineTo(PADDING + last[0] * CELL_SIZE, PADDING + last[1] * CELL_SIZE);
-    ctx.strokeStyle = 'rgba(255, 215, 0, 0.8)';
+    ctx.strokeStyle = glowColor;
     ctx.lineWidth = 6;
     ctx.lineCap = 'round';
-    ctx.shadowColor = '#ffd700';
-    ctx.shadowBlur = 20;
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = 25;
     ctx.stroke();
     ctx.restore();
 }
@@ -2421,43 +2522,97 @@ function hasNeighbor(x, y, distance = 2) {
 
 // ==================== 事件监听 ====================
 if (elements.canvas) {
+    // 点击事件（桌面端）
     elements.canvas.addEventListener('click', (e) => {
         if (!canPlayerMove()) return;
         const pos = getPosition(e);
         if (pos) placePiece(pos.x, pos.y, false);
     });
 
-    // 触摸事件支持（移动端）
+    // 触摸事件支持（移动端）- 优化版
+    let touchStartTime = 0;
+    let touchStartPos = null;
+    
+    elements.canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        touchStartTime = Date.now();
+        const touch = e.touches[0];
+        touchStartPos = { x: touch.clientX, y: touch.clientY };
+    }, { passive: false });
+    
     elements.canvas.addEventListener('touchend', (e) => {
         e.preventDefault();
         if (!canPlayerMove()) return;
+        
         const touch = e.changedTouches[0];
-        const pos = getPosition(touch);
-        if (pos) placePiece(pos.x, pos.y, false);
-    });
+        const touchEndPos = { x: touch.clientX, y: touch.clientY };
+        
+        // 检查是否是有效的点击（不是滑动）
+        if (touchStartPos) {
+            const dx = Math.abs(touchEndPos.x - touchStartPos.x);
+            const dy = Math.abs(touchEndPos.y - touchStartPos.y);
+            const touchDuration = Date.now() - touchStartTime;
+            
+            // 如果移动距离小于15px且时间小于500ms，认为是点击
+            if (dx < 15 && dy < 15 && touchDuration < 500) {
+                const pos = getPosition(touch);
+                if (pos) placePiece(pos.x, pos.y, false);
+            }
+        }
+        
+        touchStartPos = null;
+    }, { passive: false });
+    
+    // 阻止触摸移动时的默认行为（防止页面滚动）
+    elements.canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+    }, { passive: false });
 }
 
 if (elements.undoBtn) elements.undoBtn.addEventListener('click', undo);
 if (elements.restartBtn) elements.restartBtn.addEventListener('click', restartGame);
 
-// 窗口大小变化时重新调整棋盘
+// 窗口大小变化时重新调整棋盘 - 优化版，使用防抖
 let resizeTimeout;
+let lastWidth = window.innerWidth;
+let lastHeight = window.innerHeight;
+
 window.addEventListener('resize', () => {
+    // 只有当尺寸真正变化时才处理（防止移动端地址栏隐藏/显示导致的抖动）
+    const currentWidth = window.innerWidth;
+    const currentHeight = window.innerHeight;
+    
+    // 忽略小幅度的高度变化（通常是移动端地址栏）
+    const widthChanged = Math.abs(currentWidth - lastWidth) > 10;
+    const heightChanged = Math.abs(currentHeight - lastHeight) > 100;
+    
+    if (!widthChanged && !heightChanged) return;
+    
+    lastWidth = currentWidth;
+    lastHeight = currentHeight;
+    
     clearTimeout(resizeTimeout);
     resizeTimeout = setTimeout(() => {
         if (elements.gameWrapper && elements.gameWrapper.classList.contains('show') && elements.canvas) {
             adjustBoardSize();
-            const cssWidth = (CONFIG.BOARD_SIZE - 1) * CONFIG.CELL_SIZE + CONFIG.PADDING * 2;
-            elements.canvas.style.width = cssWidth + 'px';
-            elements.canvas.style.height = cssWidth + 'px';
-            elements.canvas.width = cssWidth * dpr;
-            elements.canvas.height = cssWidth * dpr;
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.scale(dpr, dpr);
-            drawBoard();
+            const cssWidth = CONFIG._cachedWidth;
+            
+            // 使用requestAnimationFrame确保平滑更新
+            requestAnimationFrame(() => {
+                elements.canvas.style.width = cssWidth + 'px';
+                elements.canvas.style.height = cssWidth + 'px';
+                elements.canvas.width = cssWidth * dpr;
+                elements.canvas.height = cssWidth * dpr;
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.scale(dpr, dpr);
+                drawBoard();
+            });
         }
-    }, 200);
+    }, 250);
 });
 
 // 页面加载时调整大小
 adjustBoardSize();
+
+// 初始化主题
+initTheme();
