@@ -81,16 +81,54 @@ const dpr = window.devicePixelRatio || 1;
 
 // ==================== 主题系统 ====================
 let currentTheme = 'dark';
+let userHasCustomTheme = false;
+let canUseThemeStorage = true;
+let themeStorageWarned = false;
+
+function normalizeThemeValue(value) {
+    return value === 'light' || value === 'dark' ? value : null;
+}
+
+function warnThemeStorage(err) {
+    if (themeStorageWarned) return;
+    console.warn('无法访问 localStorage，主题偏好仅会在本次会话中生效。', err);
+    themeStorageWarned = true;
+}
+
+function getSavedTheme() {
+    if (!canUseThemeStorage) return null;
+    try {
+        return normalizeThemeValue(localStorage.getItem('gomoku-theme'));
+    } catch (err) {
+        canUseThemeStorage = false;
+        warnThemeStorage(err);
+        return null;
+    }
+}
+
+function persistTheme(theme) {
+    if (!canUseThemeStorage) return false;
+    try {
+        localStorage.setItem('gomoku-theme', theme);
+        return true;
+    } catch (err) {
+        canUseThemeStorage = false;
+        warnThemeStorage(err);
+        return false;
+    }
+}
 
 function initTheme() {
-    const saved = localStorage.getItem('gomoku-theme');
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const prefersDarkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const saved = getSavedTheme();
+    userHasCustomTheme = !!saved;
+    const prefersDark = saved ? saved === 'dark' : prefersDarkQuery.matches;
     currentTheme = saved || (prefersDark ? 'dark' : 'light');
     applyTheme(currentTheme);
     
-    // 监听系统主题变化
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-        if (!localStorage.getItem('gomoku-theme')) {
+    // 监听系统主题变化，仅在用户未手动指定时跟随系统
+    prefersDarkQuery.addEventListener('change', (e) => {
+        if (!userHasCustomTheme) {
             currentTheme = e.matches ? 'dark' : 'light';
             applyTheme(currentTheme);
             if (elements.canvas && elements.gameWrapper?.classList.contains('show')) {
@@ -101,8 +139,11 @@ function initTheme() {
 }
 
 function toggleTheme() {
+    console.log('toggleTheme called, current:', currentTheme);
     currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
-    localStorage.setItem('gomoku-theme', currentTheme);
+    console.log('switching to:', currentTheme);
+    userHasCustomTheme = true;
+    persistTheme(currentTheme);
     applyTheme(currentTheme);
     
     // 重绘棋盘以适应新主题
@@ -112,9 +153,11 @@ function toggleTheme() {
 }
 
 function applyTheme(theme) {
+    console.log('applyTheme called with:', theme);
     // 同时设置html和body的data-theme属性，确保CSS变量正确继承
     document.documentElement.setAttribute('data-theme', theme);
     document.body.setAttribute('data-theme', theme);
+    console.log('data-theme set to:', document.documentElement.getAttribute('data-theme'));
     
     const themeColor = document.getElementById('themeColor');
     if (themeColor) {
